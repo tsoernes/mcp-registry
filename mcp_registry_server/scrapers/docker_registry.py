@@ -32,9 +32,7 @@ async def clone_or_update_docker_registry(sources_dir: Path) -> Path | None:
             repo = Repo(repo_dir)
             origin = repo.remotes.origin
             # Run git pull in executor to avoid blocking
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: origin.pull("--ff-only")
-            )
+            await asyncio.get_event_loop().run_in_executor(None, lambda: origin.pull())
             logger.info("Successfully updated Docker MCP registry")
         else:
             logger.info(f"Cloning Docker MCP registry to {repo_dir}")
@@ -112,7 +110,9 @@ def _parse_docker_registry_entry(
             tags = [tags]
 
         # Docker-built images are official
-        official = container_image and container_image.startswith("docker.io/mcp/")
+        official = bool(
+            container_image and container_image.startswith("docker.io/mcp/")
+        )
 
         # Featured flag (not in YAML schema currently)
         featured = entry_data.get("featured", False)
