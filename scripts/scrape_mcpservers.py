@@ -686,7 +686,12 @@ async def _scrape_detail_pages_async(
         h = hashlib.sha256(url.encode()).hexdigest()[:24]
         return str(Path(cache_dir) / f"{h}.html")
 
-    async with httpx.AsyncClient(timeout=20) as client:
+    # Configure connection limits for httpx client
+    limits = httpx.Limits(
+        max_connections=max_connections,
+        max_keepalive_connections=max_keepalive,
+    )
+    async with httpx.AsyncClient(timeout=20, limits=limits, http2=http2) as client:
 
         async def fetch_one(idx: int, url: str):
             async with sem:
@@ -1266,8 +1271,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=20,
-        help="Number of concurrent HTTP requests for detail pages (default: 20)",
+        default=50,
+        help="Number of concurrent HTTP requests for detail pages (default: 50)",
     )
     parser.add_argument(
         "--http2",

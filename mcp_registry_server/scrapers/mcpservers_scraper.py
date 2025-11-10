@@ -98,7 +98,7 @@ def _normalize_server_info(server: ServerInfo) -> RegistryEntry:
 
 
 async def scrape_mcpservers_org(
-    concurrency: int = 20,
+    concurrency: int = 50,
     limit: int | None = None,
     use_cache: bool = True,
     cache_dir: str | None = None,
