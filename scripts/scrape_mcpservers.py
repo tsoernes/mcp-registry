@@ -30,21 +30,20 @@ Usage with uv:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
+import hashlib
 import json
 import logging
+import pathlib
 import re
 import sys
 from dataclasses import asdict, dataclass, field
+from pathlib import Path  # ensure global Path import for cache usage
 from typing import Iterable
-
 from urllib.parse import urljoin, urlparse
 
-import asyncio
 import httpx
-import hashlib
-import pathlib
-from pathlib import Path  # ensure global Path import for cache usage
 import requests
 from bs4 import BeautifulSoup, Tag
 
@@ -794,7 +793,9 @@ def scrape_all_servers(
                 if isinstance(raw_feat, list):
                     featured_set.update([u for u in raw_feat if isinstance(u, str)])
             if strict_official:
-                logger.info("Strict official mode: ignoring persisted official_map; will recompute from /category/official pages (max 10 pages).")
+                logger.info(
+                    "Strict official mode: ignoring persisted official_map; will recompute from /category/official pages (max 10 pages)."
+                )
                 official_map.clear()
         except Exception:
             logger.debug("Failed to load meta cache maps")
@@ -833,7 +834,9 @@ def scrape_all_servers(
                 slug = href.rstrip("/").split("/")[-1]
                 if slug:
                     cat_slugs.add(slug)
-            logger.info(f"Discovered category slugs: {sorted(cat_slugs)} (official present: {'official' in cat_slugs})")
+            logger.info(
+                f"Discovered category slugs: {sorted(cat_slugs)} (official present: {'official' in cat_slugs})"
+            )
         except Exception:
             cat_slugs = set()
         # For each category, paginate and collect server links + official badges
@@ -872,7 +875,9 @@ def scrape_all_servers(
                     # Limit official category pagination in strict mode
                     original_max = max_page
                     max_page = min(max_page, 10)
-                    logger.info(f"Strict official mode: limiting official pages from {original_max} to {max_page}")
+                    logger.info(
+                        f"Strict official mode: limiting official pages from {original_max} to {max_page}"
+                    )
                 # Process page 1 now
                 for a in main0.select('a[href^="/servers/"]'):
                     href = a.get("href", "")
@@ -1052,7 +1057,9 @@ def scrape_all_servers(
             max_keepalive,
         )
     )
-    logger.info(f"Final official flag count: {sum(1 for s in servers if s.official)} (strict_official={strict_official})")
+    logger.info(
+        f"Final official flag count: {sum(1 for s in servers if s.official)} (strict_official={strict_official})"
+    )
     # Persist again after successful scrape (may include newly discovered servers)
     if meta_dir_path:
         try:
@@ -1275,12 +1282,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Discover server URLs via sitemap.xml instead of the /all listing",
     )
-   parser.add_argument(
-       "--sitemap-url",
-       type=str,
-       default=f"{BASE_URL}/sitemap.xml",
-       help="Alternate sitemap URL (default: BASE_URL/sitemap.xml)",
-   )
+    parser.add_argument(
+        "--sitemap-url",
+        type=str,
+        default=f"{BASE_URL}/sitemap.xml",
+        help="Alternate sitemap URL (default: BASE_URL/sitemap.xml)",
+    )
     return parser.parse_args(argv)
 
 
