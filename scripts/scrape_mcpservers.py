@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# dependencies = ["requests", "beautifulsoup4", "lxml"]
+# dependencies = ["httpx", "beautifulsoup4", "lxml"]
 # requires-python = ">=3.12"
 # ///
 
@@ -43,13 +43,29 @@ from urllib.parse import urljoin, urlparse
 import asyncio
 import httpx
 import hashlib
-from pathlib import Path
+import pathlib
+from pathlib import Path  # ensure global Path import for cache usage
 import requests
 from bs4 import BeautifulSoup, Tag
 
 # Constants
 BASE_URL = "https://mcpservers.org"
 ALL_PAGE = urljoin(BASE_URL, "/all")
+
+# Canonical category mapping by slug
+CATEGORY_SLUG_MAP: dict[str, str] = {
+    "search": "Search",
+    "web-scraping": "Web Scraping",
+    "communication": "Communication",
+    "productivity": "Productivity",
+    "development": "Development",
+    "database": "Database",
+    "cloud-service": "Cloud Service",
+    "file-system": "File System",
+    "cloud-storage": "Cloud Storage",
+    "version-control": "Version Control",
+    "other": "Other",
+}
 
 # Configure logging
 logging.basicConfig(
@@ -93,8 +109,12 @@ class ServerInfo:
     url: str
     github_url: str | None = None
     description: str | None = None
-    category: str | None = None
+    category: str | None = None  # primary (first) category for backward compatibility
+    categories: list[str] = field(
+        default_factory=list
+    )  # full set of functional categories (excludes Featured / Official flags)
     official: bool | None = None
+    featured: bool | None = None
     sponsor: bool | None = None
     clients: list[str] = field(default_factory=list)
     install_instructions: list[str] = field(default_factory=list)
@@ -107,8 +127,11 @@ class ServerInfo:
 
 def fetch_html(url: str, timeout: int = 20) -> str:
     logger.debug(f"Fetching URL: {url}")
-    resp = requests.get(
-        url, timeout=timeout, headers={"User-Agent": "mcpservers-scraper/1.0"}
+    resp = httpx.get(
+        url,
+        timeout=timeout,
+        headers={"User-Agent": "mcpservers-scraper/1.0"},
+        follow_redirects=True,
     )
     resp.raise_for_status()
     return resp.text
@@ -284,6 +307,9 @@ def group_install_instructions_by_client(
     by_client: dict[str, list[str]] = {}
     # Consider code blocks
     for block in code_blocks:
+        # Require install keywords to avoid unrelated client mentions
+        if not any(k.lower() in block.lower() for k in INSTALL_CODE_KEYWORDS):
+            continue
         clients = classify_clients(block)
         if not clients:
             continue
@@ -294,12 +320,19 @@ def group_install_instructions_by_client(
         text = textify(a)
         if not text:
             continue
-        clients = classify_clients(text)
+        # Link must indicate install intent or contain install keywords
+        href = a["href"]
+        installish = (
+            re.search(r"\binstall\b", text, flags=re.I)
+            or any(k.lower() in text.lower() for k in INSTALL_CODE_KEYWORDS)
+            or any(k.lower() in href.lower() for k in INSTALL_CODE_KEYWORDS)
+        )
+        if not installish:
+            continue
+        clients = classify_clients(text + " " + href)
         if clients:
             for c in clients:
-                by_client.setdefault(c, []).append(
-                    f"{text}: {urljoin(BASE_URL, a['href'])}"
-                )
+                by_client.setdefault(c, []).append(f"{text}: {urljoin(BASE_URL, href)}")
     return by_client
 
 
@@ -441,7 +474,13 @@ def detect_api_key_requirement(full_text: str) -> tuple[bool | None, list[str]]:
     return None, evidence
 
 
-def parse_server_html(url: str, html: str) -> ServerInfo:
+def parse_server_html(
+    url: str,
+    html: str,
+    category_map: dict[str, list[str]] | None = None,
+    official_map: set[str] | None = None,
+    featured_set: set[str] | None = None,
+) -> ServerInfo:
     soup = BeautifulSoup(html, "lxml")
 
     # Name: first h1 in main content
@@ -508,23 +547,14 @@ def parse_server_html(url: str, html: str) -> ServerInfo:
     # Related servers section
     related_servers = parse_related_servers(soup)
 
-    # Category: try to find category link on page (e.g., /category/...)
-    category: str | None = None
-    for a in soup.find_all("a", href=True):
-        if "/category/" in a["href"]:
-            cat = textify(a).strip()
-            if cat:
-                category = cat
-                break
+    # Categories: prefer listing-derived mapping (multi-category support)
+    categories: list[str] = category_map.get(url, []) if category_map else []
+    category: str | None = categories[0] if categories else None
 
     # Badge flags
-    official = (
-        True
-        if re.search(r"\bofficial\b", page_text, flags=re.I)
-        else False
-        if re.search(r"\b(community|unofficial)\b", page_text, flags=re.I)
-        else None
-    )
+    # Flags
+    official = True if (official_map and url in official_map) else None
+    featured = True if (featured_set and url in featured_set) else None
     sponsor = True if re.search(r"\bsponsor\b", page_text, flags=re.I) else None
 
     info = ServerInfo(
@@ -533,7 +563,9 @@ def parse_server_html(url: str, html: str) -> ServerInfo:
         github_url=github_url,
         description=description,
         category=category,
+        categories=categories,
         official=official,
+        featured=featured,
         sponsor=sponsor,
         clients=clients,
         install_instructions=install_instructions,
@@ -589,6 +621,22 @@ def merge_duplicates_by_repo(servers: list[ServerInfo]) -> list[ServerInfo]:
                 )
                 if not base.description and s.description:
                     base.description = s.description
+                # Categories merge
+                base.categories = sorted(set(base.categories + s.categories))
+                # Incorporate single category fallback from s if not already in list
+                if s.category and s.category not in base.categories:
+                    base.categories.append(s.category)
+                    base.categories = sorted(set(base.categories))
+                # Primary category selection
+                if not base.category:
+                    if base.categories:
+                        base.category = base.categories[0]
+                else:
+                    # Ensure primary category present in list
+                    if base.category not in base.categories:
+                        base.categories.append(base.category)
+                        base.categories = sorted(set(base.categories))
+                # Allow upgrading primary category from s if base lacks and s has
                 if not base.category and s.category:
                     base.category = s.category
                 base.official = (
@@ -620,6 +668,12 @@ async def _scrape_detail_pages_async(
     cache_dir: str | None,
     resume: bool,
     force_refresh: bool,
+    category_map: dict[str, str] | None,
+    official_map: set[str] | None,
+    featured_set: set[str] | None,
+    http2: bool,
+    max_connections: int,
+    max_keepalive: int,
 ) -> list[ServerInfo]:
     sem = asyncio.Semaphore(concurrency)
 
@@ -627,7 +681,7 @@ async def _scrape_detail_pages_async(
         if not cache_dir:
             return None
         import hashlib
-        from pathlib import Path
+        # from pathlib import Path  # removed to avoid shadowing global Path import
 
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
         h = hashlib.sha256(url.encode()).hexdigest()[:24]
@@ -645,7 +699,13 @@ async def _scrape_detail_pages_async(
                             with open(cpath, "r", encoding="utf-8") as fh:
                                 html = fh.read()
                                 if html and resume:
-                                    info = parse_server_html(url, html)
+                                    info = parse_server_html(
+                                        url,
+                                        html,
+                                        category_map,
+                                        official_map,
+                                        featured_set,
+                                    )
                                     logger.info(
                                         f"[{idx}/{len(links)}] Resumed {url} (cache)"
                                     )
@@ -663,7 +723,9 @@ async def _scrape_detail_pages_async(
                                 fh.write(html)
                         except Exception:
                             logger.debug(f"Failed to write cache for {url}")
-                    info = parse_server_html(url, html)
+                    info = parse_server_html(
+                        url, html, category_map, official_map, featured_set
+                    )
                     logger.info(f"[{idx}/{len(links)}] Scraped {url}")
                     return idx, info
                 except Exception as e:
@@ -684,50 +746,336 @@ def scrape_all_servers(
     limit: int | None = None,
     concurrency: int = 10,
     cache_dir: str | None = None,
+    meta_cache_dir: str | None = None,
     resume: bool = False,
     force_refresh: bool = False,
+    use_categories: bool = False,
+    use_sitemap: bool = False,
+    sitemap_url: str | None = None,
+    http2: bool = False,
+    max_connections: int = 128,
+    max_keepalive: int = 32,
 ) -> list[ServerInfo]:
-    # Cache listing page
-    listing_html: str
-    if cache_dir and resume and not force_refresh:
-        # Attempt to read cached listing
-        import hashlib
-        from pathlib import Path
+    links: list[str]
+    # Pre-pass: build category and official maps from category listing pages
+    category_map: dict[str, list[str]] = {}
+    official_map: set[str] = set()
+    featured_set: set[str] = set()
+    category_links: set[str] = set()
+    # Use separate meta cache dir for maps (category/official/featured flags)
+    meta_dir_path: pathlib.Path | None = None
+    if meta_cache_dir:
+        meta_dir_path = Path(meta_cache_dir)
+        try:
+            meta_dir_path.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        # Load persisted maps if present (category_map.json, official_map.json, featured_set.json)
+        try:
+            cat_file = meta_dir_path / "category_map.json"
+            off_file = meta_dir_path / "official_map.json"
+            feat_file = meta_dir_path / "featured_set.json"
+            if cat_file.exists():
+                raw_cat = json.loads(cat_file.read_text(encoding="utf-8"))
+                if isinstance(raw_cat, dict):
+                    for k, v in raw_cat.items():
+                        if isinstance(v, list):
+                            category_map.setdefault(k, [])
+                            for c in v:
+                                if c not in category_map[k]:
+                                    category_map[k].append(c)
+            if off_file.exists():
+                raw_off = json.loads(off_file.read_text(encoding="utf-8"))
+                if isinstance(raw_off, list):
+                    official_map.update([u for u in raw_off if isinstance(u, str)])
+            if feat_file.exists():
+                raw_feat = json.loads(feat_file.read_text(encoding="utf-8"))
+                if isinstance(raw_feat, list):
+                    featured_set.update([u for u in raw_feat if isinstance(u, str)])
+        except Exception:
+            logger.debug("Failed to load meta cache maps")
+    if use_categories:
+        # Discover category slugs dynamically from the /all page
+        try:
+            resp_all = httpx.get(
+                f"{BASE_URL}/all",
+                timeout=30,
+                headers={"User-Agent": "mcpservers-scraper/1.0"},
+                follow_redirects=True,
+            )
+            # Mark featured servers from first page listing
+            try:
+                soup_feat = BeautifulSoup(resp_all.text, "lxml")
+                feat_count = 0
+                for a in soup_feat.select('a[href^="/servers/"]'):
+                    href = a.get("href", "")
+                    if not href:
+                        continue
+                    u = urljoin(BASE_URL, href)
+                    featured_set.add(u)
+                    feat_count += 1
+                logger.info(f"Identified {feat_count} featured servers (flags only)")
+            except Exception:
+                pass
+            resp_all.raise_for_status()
+            soup_all = BeautifulSoup(resp_all.text, "lxml")
+            cat_slugs: set[str] = set()
+            for a in soup_all.select('a[href^="/category/"]'):
+                href = a.get("href", "")
+                if not href:
+                    continue
+                slug = href.rstrip("/").split("/")[-1]
+                if slug:
+                    cat_slugs.add(slug)
+        except Exception:
+            cat_slugs = set()
+        # For each category, paginate and collect server links + official badges
+        for slug in sorted(cat_slugs):
+            # Determine max pagination page from first page, then iterate deterministically
+            try:
+                first_url = f"{BASE_URL}/category/{slug}"
+                resp0 = httpx.get(
+                    first_url,
+                    timeout=30,
+                    headers={"User-Agent": "mcpservers-scraper/1.0"},
+                    follow_redirects=True,
+                )
+                resp0.raise_for_status()
+                soup0 = BeautifulSoup(resp0.text, "lxml")
+                main0 = soup0.find("main") or soup0
+                # Derive canonical category name from slug (ignore heading text for normalization)
+                canonical_name = CATEGORY_SLUG_MAP.get(slug, "Other")
+                page_category_name0 = canonical_name
+                # Find max page from pagination links (?page=N)
+                max_page = 1
+                for p in main0.select('a[href*="?page="]'):
+                    hrefp = p.get("href", "")
+                    m = re.search(r"[?&]page=(\d+)", hrefp)
+                    if m:
+                        try:
+                            max_page = max(max_page, int(m.group(1)))
+                        except ValueError:
+                            pass
+                # Process page 1 now
+                for a in main0.select('a[href^="/servers/"]'):
+                    href = a.get("href", "")
+                    if not href:
+                        continue
+                    u = urljoin(BASE_URL, href)
+                    if u in category_links:
+                        continue
+                    category_links.add(u)
+                    # Nearest container for badge detection
+                    container = a.find_parent(["li", "article", "div"]) or a
+                    category_map.setdefault(u, [])
+                    if page_category_name0 not in category_map[u]:
+                        category_map[u].append(page_category_name0)
+                    if len(official_map) < 10 and re.search(
+                        r"\bofficial\b", textify(container), flags=re.I
+                    ):
+                        official_map.add(u)
+                # Iterate remaining pages 2..max_page
+                for page in range(2, max_page + 1):
+                    cat_url = f"{BASE_URL}/category/{slug}?page={page}"
+                    try:
+                        resp = httpx.get(
+                            cat_url,
+                            timeout=30,
+                            headers={"User-Agent": "mcpservers-scraper/1.0"},
+                            follow_redirects=True,
+                        )
+                        resp.raise_for_status()
+                        soup = BeautifulSoup(resp.text, "lxml")
+                        main_el = soup.find("main") or soup
+                        # Category name should match first page h1
+                        for a in main_el.select('a[href^="/servers/"]'):
+                            href = a.get("href", "")
+                            if not href:
+                                continue
+                            u = urljoin(BASE_URL, href)
+                            if u in category_links:
+                                continue
+                            category_links.add(u)
+                            container = a.find_parent(["li", "article", "div"]) or a
+                            category_map.setdefault(u, [])
+                            if page_category_name0 not in category_map[u]:
+                                category_map[u].append(page_category_name0)
+                            if len(official_map) < 10 and re.search(
+                                r"\bofficial\b", textify(container), flags=re.I
+                            ):
+                                official_map.add(u)
+                    except Exception:
+                        # Continue to next page on error
+                        continue
+            except Exception:
+                # Skip this category if first page fails
+                continue
 
-        Path(cache_dir).mkdir(parents=True, exist_ok=True)
-        lh = hashlib.sha256(ALL_PAGE.encode()).hexdigest()[:24]
-        lpath = Path(cache_dir) / f"{lh}.html"
-        if lpath.exists():
-            listing_html = lpath.read_text(encoding="utf-8")
-        else:
-            listing_html = fetch_html(ALL_PAGE)
-            lpath.write_text(listing_html, encoding="utf-8")
-    else:
-        listing_html = fetch_html(ALL_PAGE)
-        if cache_dir:
+    if use_categories:
+        # Featured already flagged earlier; do not add to categories
+        links = sorted(category_links)
+    elif use_sitemap:
+        # Discover server links via sitemap.xml
+        sm_url = sitemap_url or f"{BASE_URL}/sitemap.xml"
+        sitemap_text: str
+
+        if cache_dir and resume and not force_refresh:
+            # Attempt to read cached sitemap
             import hashlib
-            from pathlib import Path
+            # from pathlib import Path  # removed to avoid creating local Path
+
+            Path(cache_dir).mkdir(parents=True, exist_ok=True)
+            sh = hashlib.sha256(sm_url.encode()).hexdigest()[:24]
+            spath = Path(cache_dir) / f"{sh}.html"
+            if spath.exists():
+                sitemap_text = spath.read_text(encoding="utf-8")
+            else:
+                resp = httpx.get(
+                    sm_url,
+                    timeout=30,
+                    headers={"User-Agent": "mcpservers-scraper/1.0"},
+                    follow_redirects=True,
+                )
+                resp.raise_for_status()
+                sitemap_text = resp.text
+                spath.write_text(sitemap_text, encoding="utf-8")
+        else:
+            resp = httpx.get(
+                sm_url,
+                timeout=30,
+                headers={"User-Agent": "mcpservers-scraper/1.0"},
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            sitemap_text = resp.text
+            if cache_dir:
+                import hashlib
+                # from pathlib import Path  # removed to rely on module-level Path
+
+                Path(cache_dir).mkdir(parents=True, exist_ok=True)
+                sh = hashlib.sha256(sm_url.encode()).hexdigest()[:24]
+                spath = Path(cache_dir) / f"{sh}.html"
+                try:
+                    spath.write_text(sitemap_text, encoding="utf-8")
+                except Exception:
+                    logger.debug("Failed to write sitemap cache")
+
+        # Parse URLs from sitemap content and filter server detail pages
+        candidates = re.findall(r"https?://[^\s<>]+", sitemap_text)
+        links = sorted(
+            {u for u in candidates if u.startswith(BASE_URL) and "/servers/" in u}
+        )
+        logger.info(f"Discovered {len(links)} server pages via sitemap")
+    else:
+        # Cache listing page
+        listing_html: str
+        if cache_dir and resume and not force_refresh:
+            # Attempt to read cached listing
+            import hashlib
+            # from pathlib import Path  # removed to prevent local shadowing
 
             Path(cache_dir).mkdir(parents=True, exist_ok=True)
             lh = hashlib.sha256(ALL_PAGE.encode()).hexdigest()[:24]
             lpath = Path(cache_dir) / f"{lh}.html"
-            try:
+            if lpath.exists():
+                listing_html = lpath.read_text(encoding="utf-8")
+            else:
+                listing_html = fetch_html(ALL_PAGE)
                 lpath.write_text(listing_html, encoding="utf-8")
-            except Exception:
-                logger.debug("Failed to write listing cache")
+        else:
+            listing_html = fetch_html(ALL_PAGE)
+            if cache_dir:
+                import hashlib
 
-    links = parse_all_server_links(listing_html)
+                Path(cache_dir).mkdir(parents=True, exist_ok=True)
+                lh = hashlib.sha256(ALL_PAGE.encode()).hexdigest()[:24]
+                lpath = Path(cache_dir) / f"{lh}.html"
+                try:
+                    lpath.write_text(listing_html, encoding="utf-8")
+                except Exception:
+                    logger.debug("Failed to write listing cache")
+
+        links = parse_all_server_links(listing_html)
+        # Official detection is sourced from category pages only in this mode.
+        pass
+
     if limit is not None:
         links = links[:limit]
+    # Persist updated maps before scraping details (so a failed run still leaves maps)
+    if meta_dir_path:
+        try:
+            (meta_dir_path / "category_map.json").write_text(
+                json.dumps(
+                    {k: v for k, v in category_map.items()},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (meta_dir_path / "official_map.json").write_text(
+                json.dumps(sorted(list(official_map)), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            (meta_dir_path / "featured_set.json").write_text(
+                json.dumps(sorted(list(featured_set)), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.debug("Failed to persist meta maps before detail scrape")
     servers = asyncio.run(
-        _scrape_detail_pages_async(links, concurrency, cache_dir, resume, force_refresh)
+        _scrape_detail_pages_async(
+            links,
+            concurrency,
+            cache_dir,
+            resume,
+            force_refresh,
+            category_map,
+            official_map,
+            featured_set,
+            http2,
+            max_connections,
+            max_keepalive,
+        )
     )
+    # Persist again after successful scrape (may include newly discovered servers)
+    if meta_dir_path:
+        try:
+            (meta_dir_path / "category_map.json").write_text(
+                json.dumps(
+                    {k: v for k, v in category_map.items()},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (meta_dir_path / "official_map.json").write_text(
+                json.dumps(sorted(list(official_map)), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            (meta_dir_path / "featured_set.json").write_text(
+                json.dumps(sorted(list(featured_set)), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            logger.info(
+                f"Meta caches persisted: {len(category_map)} category entries, "
+                f"{len(official_map)} official, {len(featured_set)} featured flags"
+            )
+        except Exception:
+            logger.debug("Failed to persist meta maps after detail scrape")
     servers = merge_duplicates_by_repo(servers)
     return servers
 
 
 def output_json(servers: list[ServerInfo]) -> None:
-    print(json.dumps([asdict(s) for s in servers], ensure_ascii=False, indent=2))
+    enriched = []
+    for s in servers:
+        data = asdict(s)
+        data["category"] = s.category
+        data["categories"] = s.categories
+        data["official"] = s.official
+        data["featured"] = s.featured
+        enriched.append(data)
+    print(json.dumps(enriched, ensure_ascii=False, indent=2))
 
 
 def output_markdown(servers: list[ServerInfo]) -> None:
@@ -742,8 +1090,12 @@ def output_markdown(servers: list[ServerInfo]) -> None:
             lines.append(f"- Description: {s.description}")
         if s.category:
             lines.append(f"- Category: {s.category}")
+        if s.categories:
+            lines.append(f"- Categories: {', '.join(s.categories)}")
         if s.official is not None:
             lines.append(f"- Official: {'Yes' if s.official else 'No'}")
+        if s.featured is not None:
+            lines.append(f"- Featured: {'Yes' if s.featured else 'No'}")
         if s.sponsor is not None:
             lines.append(f"- Sponsor: {'Yes' if s.sponsor else 'No'}")
         if s.clients:
@@ -797,7 +1149,9 @@ def output_csv(servers: list[ServerInfo]) -> None:
             "github_url",
             "description",
             "category",
+            "categories",
             "official",
+            "featured",
             "sponsor",
             "clients",
             "requires_api_key",
@@ -814,7 +1168,9 @@ def output_csv(servers: list[ServerInfo]) -> None:
                 s.github_url or "",
                 s.description or "",
                 s.category or "",
+                ", ".join(s.categories),
                 "" if s.official is None else ("yes" if s.official else "no"),
+                "" if s.featured is None else ("yes" if s.featured else "no"),
                 "" if s.sponsor is None else ("yes" if s.sponsor else "no"),
                 ", ".join(s.clients),
                 ""
@@ -850,10 +1206,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Number of concurrent HTTP requests for detail pages (default: 10)",
     )
     parser.add_argument(
+        "--http2",
+        action="store_true",
+        help="Enable HTTP/2 for the HTTP client (default: disabled)",
+    )
+    parser.add_argument(
+        "--max-connections",
+        type=int,
+        default=128,
+        help="httpx max concurrent connections (default: 128)",
+    )
+    parser.add_argument(
+        "--max-keepalive",
+        type=int,
+        default=32,
+        help="httpx max keep-alive connections (default: 32)",
+    )
+    parser.add_argument(
         "--cache-dir",
         type=str,
         default=".cache/html",
         help="Directory to store/read cached HTML (default: .cache/html)",
+    )
+    parser.add_argument(
+        "--meta-cache-dir",
+        type=str,
+        default=".cache/meta",
+        help="Directory to store/read cached metadata maps (default: .cache/meta)",
     )
     parser.add_argument(
         "--resume",
@@ -865,6 +1244,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Ignore cache and re-fetch all pages",
     )
+    parser.add_argument(
+        "--use-categories",
+        action="store_true",
+        help="Discover categories dynamically and scrape per-category with pagination",
+    )
+    parser.add_argument(
+        "--use-sitemap",
+        action="store_true",
+        help="Discover server URLs via sitemap.xml instead of the /all listing",
+    )
+    parser.add_argument(
+        "--sitemap-url",
+        type=str,
+        default=f"{BASE_URL}/sitemap.xml",
+        help="Alternate sitemap URL (default: BASE_URL/sitemap.xml)",
+    )
     return parser.parse_args(argv)
 
 
@@ -875,8 +1270,15 @@ def main(argv: list[str]) -> int:
         limit=args.limit,
         concurrency=args.concurrency,
         cache_dir=args.cache_dir,
+        meta_cache_dir=args.meta_cache_dir,
         resume=args.resume,
         force_refresh=args.force_refresh,
+        use_categories=args.use_categories,
+        use_sitemap=args.use_sitemap,
+        sitemap_url=args.sitemap_url,
+        http2=args.http2,
+        max_connections=args.max_connections,
+        max_keepalive=args.max_keepalive,
     )
 
     if args.output == "json":
