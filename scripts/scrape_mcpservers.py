@@ -842,7 +842,7 @@ def scrape_all_servers(
         # Scrape dedicated /official pages (site-specific) if 'official' slug not in discovered categories
         if "official" not in cat_slugs:
             try:
-                max_official_pages = 50 if not strict_official else 10
+                max_official_pages = 1000  # remove artificial 10-page cap; paginate fully until no new links
                 total_official_before = len(official_map)
                 for page in range(1, max_official_pages + 1):
                     off_url = f"{BASE_URL}/official" + (
@@ -1316,7 +1316,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--use-categories",
         action="store_true",
-        help="Discover categories dynamically and scrape per-category with pagination",
+        default=True,
+        help="Discover categories dynamically and scrape per-category with pagination (default: enabled)",
     )
     parser.add_argument(
         "--use-sitemap",
@@ -1334,6 +1335,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    # Enforce default True for use_categories when flag not explicitly provided
+    if "--use-categories" not in argv:
+        args.use_categories = True
 
     servers = scrape_all_servers(
         limit=args.limit,
