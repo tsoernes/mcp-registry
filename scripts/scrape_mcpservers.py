@@ -839,6 +839,47 @@ def scrape_all_servers(
             )
         except Exception:
             cat_slugs = set()
+        # Scrape dedicated /official pages (site-specific) if 'official' slug not in discovered categories
+        if "official" not in cat_slugs:
+            try:
+                max_official_pages = 50 if not strict_official else 10
+                total_official_before = len(official_map)
+                for page in range(1, max_official_pages + 1):
+                    off_url = f"{BASE_URL}/official" + (
+                        "" if page == 1 else f"?page={page}"
+                    )
+                    try:
+                        resp_off = httpx.get(
+                            off_url,
+                            timeout=30,
+                            headers={"User-Agent": "mcpservers-scraper/1.0"},
+                            follow_redirects=True,
+                        )
+                        if resp_off.status_code >= 400:
+                            break
+                        soup_off = BeautifulSoup(resp_off.text, "lxml")
+                        main_off = soup_off.find("main") or soup_off
+                        new_links = 0
+                        for a in main_off.select('a[href^="/servers/"]'):
+                            href = a.get("href", "")
+                            if not href:
+                                continue
+                            u = urljoin(BASE_URL, href)
+                            if u not in official_map:
+                                official_map.add(u)
+                                new_links += 1
+                            if u not in category_links:
+                                category_links.add(u)
+                        if new_links == 0:
+                            # Stop early if no new official links discovered on this page
+                            break
+                    except Exception:
+                        break
+                logger.info(
+                    f"Collected {len(official_map) - total_official_before} official servers from /official pages (total={len(official_map)})"
+                )
+            except Exception:
+                logger.warning("Failed scraping /official pages for official flags")
         # For each category, paginate and collect server links + official badges
         for slug in sorted(cat_slugs):
             # Log discovered slugs for debugging
