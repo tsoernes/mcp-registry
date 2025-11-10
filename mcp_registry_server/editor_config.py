@@ -2,9 +2,17 @@
 
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
+
+try:
+    import json5
+
+    HAS_JSON5 = True
+except ImportError:
+    HAS_JSON5 = False
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +94,8 @@ class EditorConfigManager:
     def _load_json_config(config_path: Path) -> dict[str, Any]:
         """Load JSON config file, creating if it doesn't exist.
 
+        Handles both standard JSON and JSON5 (for Zed configs with comments).
+
         Args:
             config_path: Path to config file
 
@@ -98,7 +108,26 @@ class EditorConfigManager:
 
         try:
             with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                content = f.read()
+
+            # Try json5 first if available (for Zed configs with comments)
+            if HAS_JSON5:
+                try:
+                    return json5.loads(content)
+                except Exception:
+                    pass  # Fall back to standard JSON
+
+            # Try standard JSON
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                # If standard JSON fails, try stripping comments manually
+                # Remove single-line comments
+                content_no_comments = re.sub(r"//.*?$", "", content, flags=re.MULTILINE)
+                # Remove trailing commas before } or ]
+                content_no_comments = re.sub(r",(\s*[}\]])", r"\1", content_no_comments)
+                return json.loads(content_no_comments)
+
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in {config_path}: {e}")
             raise ValueError(f"Config file contains invalid JSON: {e}")
