@@ -156,28 +156,64 @@ Active servers are persisted to `cache/active_mounts.json` and automatically res
 
 ## Development
 
+### Setting up development environment
+
+```bash
+# Clone the repository
+git clone https://github.com/tsoernes/mcp-registry.git
+cd mcp-registry
+
+# Install with development dependencies
+pip install -e ".[dev]"
+```
+
 ### Running tests
 
 ```bash
+# Run all tests
 pytest
+
+# Run with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_registry.py
+
+# Run specific test
+pytest tests/test_models.py::TestRegistryEntry::test_create_valid_entry
 ```
 
 ### Running with coverage
 
 ```bash
+# Generate coverage report
 pytest --cov=mcp_registry_server --cov-report=html
+
+# View coverage in browser
+open htmlcov/index.html
 ```
 
-### Code formatting
+### Code formatting and linting
 
 ```bash
+# Format code
 ruff format .
+
+# Check for issues
+ruff check .
+
+# Auto-fix issues
+ruff check --fix .
 ```
 
-### Linting
+### Manual testing
 
 ```bash
-ruff check .
+# Test the server with fastmcp CLI
+fastmcp dev mcp_registry_server/server.py
+
+# Or run directly
+python -m mcp_registry_server.server
 ```
 
 ## Security Considerations
@@ -195,11 +231,16 @@ ruff check .
 - [x] Fuzzy search with RapidFuzz
 - [x] Session persistence
 - [x] Background refresh scheduler
+- [x] Comprehensive test suite with pytest
+- [x] Registry tools (find, list, add, remove, active, status, config-set, refresh)
 - [ ] Automatic image building from source
+- [ ] Tool dispatch (registry-exec implementation)
 - [ ] Authentication/secrets management
 - [ ] Code-mode tool composition
-- [ ] Additional registry sources
+- [ ] Additional registry sources (Awesome MCP)
 - [ ] WebUI for registry exploration
+- [ ] Docker Compose example
+- [ ] CI/CD pipeline
 
 ## Contributing
 
@@ -215,8 +256,26 @@ Contributions are welcome! Please:
 
 MIT License - see [LICENSE](LICENSE) for details.
 
+## Project Status
+
+**Current Version:** 0.1.0 (Early Development)
+
+- ✅ Core registry and search functionality complete
+- ✅ mcpservers.org scraper integrated
+- ✅ Docker registry git source integration
+- ✅ Podman container management
+- ✅ Background refresh scheduler
+- ✅ Comprehensive test suite (70%+ coverage)
+- ⏳ Tool dispatch to mounted servers (in progress)
+- ⏳ Source-based server building (planned)
+
 ## Acknowledgments
 
 - Built with [FastMCP](https://github.com/jlowin/fastmcp)
 - Inspired by [Docker Dynamic MCP](https://docs.docker.com/ai/mcp-catalog-and-toolkit/dynamic-mcp/)
 - Aggregates data from [Docker MCP Registry](https://github.com/docker/mcp-registry) and [mcpservers.org](https://mcpservers.org)
+
+## Support
+
+- GitHub Issues: [Report bugs or request features](https://github.com/tsoernes/mcp-registry/issues)
+- Discussions: [Ask questions or share ideas](https://github.com/tsoernes/mcp-registry/discussions)
