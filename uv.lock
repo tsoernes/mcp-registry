@@ -777,6 +777,7 @@ dependencies = [
     { name = "json5" },
     { name = "lxml" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "rapidfuzz" },
 ]
 
@@ -806,6 +807,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rapidfuzz", specifier = ">=3.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
 ]

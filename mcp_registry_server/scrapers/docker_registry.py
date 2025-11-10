@@ -1,11 +1,10 @@
 """Docker MCP registry source integration via git cloning."""
 
 import asyncio
-import json
 import logging
-from datetime import datetime
 from pathlib import Path
 
+import yaml
 from git import Repo
 from git.exc import GitCommandError
 
@@ -56,57 +55,84 @@ async def clone_or_update_docker_registry(sources_dir: Path) -> Path | None:
 def _parse_docker_registry_entry(
     entry_data: dict, entry_id: str
 ) -> RegistryEntry | None:
-    """Parse a single Docker registry entry to RegistryEntry format.
+    """Parse a single Docker registry YAML entry to RegistryEntry format.
 
     Args:
-        entry_data: Raw entry data from Docker registry JSON
-        entry_id: Entry identifier/key
+        entry_data: Raw entry data from Docker registry server.yaml
+        entry_id: Entry identifier/key (directory name)
 
     Returns:
         Normalized RegistryEntry or None if parsing fails
     """
     try:
-        # Docker registry schema (based on CONTRIBUTING.md and examples)
-        # Expected fields: name, description, image (or sourceRepository), category, tags, etc.
+        # Docker registry YAML schema:
+        # name: string
+        # image: string (e.g., "mcp/github")
+        # type: "server"
+        # meta:
+        #   category: string
+        #   tags: list[string]
+        # about:
+        #   title: string
+        #   description: string
+        #   icon: string (URL)
+        # source:
+        #   project: string (GitHub URL)
+        #   branch: string
+        #   commit: string
+        #   dockerfile: string
+        # config:
+        #   secrets: list[{name, env, example}]
+        #   parameters: object (JSON schema)
 
-        name = entry_data.get("name") or entry_data.get("title") or entry_id
-        description = entry_data.get("description", "")
+        name = entry_data.get("name") or entry_id
+
+        # Get description from about section
+        about = entry_data.get("about", {})
+        title = about.get("title", name)
+        description = about.get("description", "")
 
         # Container image reference
         container_image = entry_data.get("image")
-        repo_url = entry_data.get("sourceRepository") or entry_data.get("repository")
+        if container_image and not container_image.startswith("docker.io/"):
+            # Prepend docker.io/ if not present
+            container_image = f"docker.io/{container_image}"
 
-        # Categories and tags
-        categories = []
-        if "category" in entry_data:
-            cat = entry_data["category"]
-            categories = [cat] if isinstance(cat, str) else cat
+        # Get source repository
+        source = entry_data.get("source", {})
+        repo_url = source.get("project")
 
-        tags = entry_data.get("tags", [])
+        # Categories and tags from meta
+        meta = entry_data.get("meta", {})
+        category = meta.get("category")
+        categories = [category] if category else []
+
+        tags = meta.get("tags", [])
         if isinstance(tags, str):
             tags = [tags]
 
-        # Official/featured flags (Docker-built images are official)
-        official = entry_data.get("official", False)
-        if container_image and container_image.startswith("docker.io/mcp/"):
-            official = True
+        # Docker-built images are official
+        official = container_image and container_image.startswith("docker.io/mcp/")
 
+        # Featured flag (not in YAML schema currently)
         featured = entry_data.get("featured", False)
 
-        # API key requirement
-        requires_api_key = entry_data.get("requiresApiKey", False)
+        # Check for API key requirements from config.secrets
+        requires_api_key = False
+        config = entry_data.get("config", {})
+        secrets = config.get("secrets", [])
+        if secrets:
+            requires_api_key = True
 
-        # Tools (if pre-listed)
-        tools = entry_data.get("tools", [])
-        if isinstance(tools, str):
-            tools = [tools]
+        # Tools (will be discovered on activation)
+        tools = []
 
         # Launch method
         launch_method = LaunchMethod.PODMAN if container_image else LaunchMethod.UNKNOWN
 
         return RegistryEntry(
             id=f"docker/{entry_id}",
-            name=name,
+            name=title or name,
             description=description,
             source=SourceType.DOCKER,
             repo_url=repo_url,
@@ -121,7 +147,9 @@ def _parse_docker_registry_entry(
             raw_metadata=entry_data,
         )
     except Exception as e:
-        logger.warning(f"Failed to parse Docker registry entry {entry_id}: {e}")
+        logger.warning(
+            f"Failed to parse Docker registry entry {entry_id}: {e}", exc_info=True
+        )
         return None
 
 
@@ -144,56 +172,48 @@ async def scrape_docker_registry(sources_dir: Path) -> list[RegistryEntry]:
 
     entries = []
 
-    # Look for JSON files or structured data in the repository
-    # Docker registry structure may vary, so we check multiple patterns
+    # Docker MCP registry structure:
+    # servers/
+    #   <server-name>/
+    #     server.yaml
+    #     readme.md (optional)
 
-    # Pattern 1: Single registry.json file
-    registry_json = repo_dir / "registry.json"
-    if registry_json.exists():
-        try:
-            with open(registry_json, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            # Handle different JSON structures
-            servers = data
-            if isinstance(data, dict):
-                servers = data.get("servers") or data.get("mcpServers") or data
-
-            if isinstance(servers, dict):
-                # Key-value mapping
-                for entry_id, entry_data in servers.items():
-                    entry = _parse_docker_registry_entry(entry_data, entry_id)
-                    if entry:
-                        entries.append(entry)
-            elif isinstance(servers, list):
-                # List of entries
-                for i, entry_data in enumerate(servers):
-                    entry_id = (
-                        entry_data.get("id") or entry_data.get("name") or f"entry-{i}"
-                    )
-                    entry = _parse_docker_registry_entry(entry_data, entry_id)
-                    if entry:
-                        entries.append(entry)
-        except Exception as e:
-            logger.error(f"Failed to parse registry.json: {e}")
-
-    # Pattern 2: Multiple JSON files in a servers/ directory
     servers_dir = repo_dir / "servers"
-    if servers_dir.exists() and servers_dir.is_dir():
-        for json_file in servers_dir.glob("*.json"):
-            try:
-                with open(json_file, "r", encoding="utf-8") as f:
-                    entry_data = json.load(f)
+    if not servers_dir.exists() or not servers_dir.is_dir():
+        logger.warning(f"No servers/ directory found in {repo_dir}")
+        return []
 
-                entry_id = json_file.stem
-                entry = _parse_docker_registry_entry(entry_data, entry_id)
-                if entry:
-                    entries.append(entry)
-            except Exception as e:
-                logger.warning(f"Failed to parse {json_file.name}: {e}")
+    # Iterate through server directories
+    for server_dir in servers_dir.iterdir():
+        if not server_dir.is_dir():
+            continue
 
-    # Pattern 3: YAML files (if present, convert to dict)
-    # TODO: Add YAML support if Docker registry uses it
+        # Look for server.yaml file
+        yaml_file = server_dir / "server.yaml"
+        if not yaml_file.exists():
+            logger.debug(f"No server.yaml found in {server_dir.name}, skipping")
+            continue
 
-    logger.info(f"Scraped {len(entries)} entries from Docker MCP registry")
+        try:
+            with open(yaml_file, "r", encoding="utf-8") as f:
+                entry_data = yaml.safe_load(f)
+
+            if not entry_data:
+                logger.warning(f"Empty YAML in {server_dir.name}/server.yaml")
+                continue
+
+            # Use directory name as entry_id
+            entry_id = server_dir.name
+            entry = _parse_docker_registry_entry(entry_data, entry_id)
+            if entry:
+                entries.append(entry)
+        except yaml.YAMLError as e:
+            logger.warning(f"Failed to parse YAML {server_dir.name}/server.yaml: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to process {server_dir.name}: {e}", exc_info=True)
+
+    logger.info(
+        f"Scraped {len(entries)} entries from Docker MCP registry "
+        f"(official={sum(1 for e in entries if e.official)})"
+    )
     return entries
