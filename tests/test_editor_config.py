@@ -66,6 +66,7 @@ class TestEditorConfigManager:
         assert "context_servers" in config
         assert "test-server" in config["context_servers"]
         assert config["context_servers"]["test-server"]["command"] == "npx"
+        assert config["context_servers"]["test-server"]["source"] == "custom"
         assert config["context_servers"]["test-server"]["args"] == [
             "-y",
             "@test/server",
@@ -144,6 +145,7 @@ class TestEditorConfigManager:
 
         server_config = config["context_servers"]["simple-server"]
         assert server_config["command"] == "python"
+        assert server_config["source"] == "custom"
         assert "args" not in server_config
         assert "env" not in server_config
 
@@ -313,6 +315,7 @@ class TestEditorConfigManager:
 
         # Should have new configuration
         assert config["context_servers"]["test"]["command"] == "node"
+        assert config["context_servers"]["test"]["source"] == "custom"
         assert config["context_servers"]["test"]["args"] == ["new.js"]
 
 

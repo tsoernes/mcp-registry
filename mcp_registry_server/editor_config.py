@@ -152,7 +152,7 @@ class EditorConfigManager:
         if "context_servers" not in config:
             config["context_servers"] = {}
 
-        server_config: dict[str, Any] = {"command": command}
+        server_config: dict[str, Any] = {"command": command, "source": "custom"}
         if args:
             server_config["args"] = args
         if env:

@@ -10,7 +10,7 @@ A dynamic MCP (Model Context Protocol) registry server that aggregates MCP serve
 - **mcpservers.org**: Community-curated MCP servers with rich metadata (official, featured, categories)
 - **Future sources**: Extensible architecture for additional registries
 
-Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses **Podman** for containerized MCP servers, making it ideal for rootless container environments and Fedora-based systems.
+Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses **Podman** for containerized MCP servers and supports **stdio-based servers** with automatic editor configuration, making it ideal for rootless container environments and Fedora-based systems.
 
 ## Features
 
@@ -20,6 +20,8 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 - **Fuzzy search**: Find servers by name, description, tags, or categories using intelligent matching
 - **Dynamic activation**: Add/remove MCP servers on-demand during a session
 - **Podman integration**: Run containerized MCP servers using Podman (rootless compatible)
+- **Stdio server support**: Automatically configure npm/npx/python-based servers in editor configs
+- **Editor integration**: Automatic configuration for Zed and Claude Desktop
 - **Session persistence**: Active servers persist across restarts
 - **Auto-refresh**: Background updates from sources (max once per 24h)
 - **Rich metadata**: Categories, tags, official/featured flags, API key requirements
@@ -30,7 +32,7 @@ The server exposes the following tools to AI agents:
 
 - `registry-find`: Search for MCP servers by name, description, tags, or categories
 - `registry-list`: List all available servers in the aggregated registry
-- `registry-add`: Activate an MCP server in the current session
+- `registry-add`: Activate an MCP server (Podman container or editor config)
 - `registry-remove`: Deactivate a previously added server
 - `registry-active`: List currently active/mounted servers
 - `registry-config-set`: Configure environment variables for a server
@@ -95,8 +97,11 @@ Once connected to an MCP client (like Claude Desktop):
 User: "Find MCP servers for working with databases"
 → Server uses registry-find to search
 
-User: "Add the postgres server"
-→ Server uses registry-add to activate it
+User: "Add the postgres server to Claude Desktop"
+→ Server uses registry-add to activate it (Podman container)
+
+User: "Add the filesystem server to Zed"
+→ Server uses registry-add with editor integration (stdio server)
 
 User: "Run a query: SELECT * FROM users LIMIT 5"
 → Server uses registry-exec to dispatch to postgres tools
@@ -139,8 +144,9 @@ Each registry entry includes:
 - `featured`: Featured status (from mcpservers.org)
 - `requires_api_key`: Whether API credentials are needed
 - `tools`: Available tool names (discovered on activation)
-- `launch_method`: How to run (podman, stdio-proxy, remote-http)
-- `last_refreshed`: Last metadata update timestamp
+launch_method: How to run (podman, stdio-proxy, remote-http)
+server_command: Command configuration for stdio servers (command, args, env)
+last_refreshed: Last metadata update timestamp
 
 ## Configuration
 
@@ -221,6 +227,7 @@ python -m mcp_registry_server.server
 - Container images are validated before running
 - Environment variable injection is restricted to an allowlist
 - Podman runs containers without privileged access
+- Editor config files are backed up before modification
 - Source repositories are cloned/pulled with verification
 - Rate limiting prevents excessive refresh attempts
 
@@ -233,6 +240,8 @@ python -m mcp_registry_server.server
 - [x] Background refresh scheduler
 - [x] Comprehensive test suite with pytest
 - [x] Registry tools (find, list, add, remove, active, status, config-set, refresh)
+- [x] Stdio server support with automatic editor configuration
+- [x] Zed and Claude Desktop integration
 - [ ] Automatic image building from source
 - [ ] Tool dispatch (registry-exec implementation)
 - [ ] Authentication/secrets management
@@ -264,6 +273,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 - ✅ mcpservers.org scraper integrated
 - ✅ Docker registry git source integration
 - ✅ Podman container management
+- ✅ Stdio server support with editor configuration
+- ✅ Zed and Claude Desktop integration
 - ✅ Background refresh scheduler
 - ✅ Comprehensive test suite (70%+ coverage)
 - ⏳ Tool dispatch to mounted servers (in progress)

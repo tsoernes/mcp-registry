@@ -128,11 +128,17 @@ Show me servers from the Docker registry
 
 ### 4. Activate a server
 
+For Podman-based servers (containers):
 ```
-Add the postgres MCP server
+Add the postgres MCP server to Claude Desktop
 ```
 
-Note: The server will be pulled as a Podman container and activated.
+For stdio-based servers (npm/python packages):
+```
+Add the filesystem server to Zed
+```
+
+Note: The `editor` parameter is required. Podman servers will pull and run as containers. Stdio servers will be automatically added to your editor's config file.
 
 ### 5. List active servers
 
@@ -158,8 +164,10 @@ The registry provides these tools:
 
 - **registry-find**: Search for servers (fuzzy matching, filters)
 - **registry-list**: Browse all available servers
-- **registry-add**: Activate a server (pulls container, starts it)
-- **registry-remove**: Deactivate a server (stops container)
+- **registry-add**: Activate a server (Podman container or editor config)
+  - For containers: pulls image and starts container
+  - For stdio: adds to Zed or Claude Desktop config
+- **registry-remove**: Deactivate a server (stops container or removes from config)
 - **registry-active**: List currently running servers
 - **registry-config-set**: Configure environment variables
 - **registry-exec**: Execute tools from active servers (coming soon)
@@ -173,11 +181,13 @@ The registry aggregates servers from:
 1. **Docker MCP Registry** (official Docker catalog)
    - Cloned from https://github.com/docker/mcp-registry
    - Auto-refreshed every 24 hours
+   - Mostly Podman-based container images
 
 2. **mcpservers.org** (community catalog)
    - Scraped from https://mcpservers.org
    - Auto-refreshed every 24 hours
    - Includes official/featured flags, categories, tags
+   - Mix of Podman containers and stdio servers (npm/python packages)
 
 ## Cache and Data Storage
 
@@ -230,6 +240,18 @@ Refresh all registry sources
    ```
 
 3. Try removing and re-adding the server
+
+### Stdio server not showing in editor
+
+1. Check that the config file was modified:
+   - Zed: `~/.config/zed/settings.json`
+   - Claude: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+2. Restart the editor
+
+3. Check for backup files (`.backup` suffix) if config was corrupted
+
+4. Look for the server under `context_servers` (Zed) or `mcpServers` (Claude)
 
 ### Import errors
 
@@ -307,6 +329,34 @@ await scheduler.force_refresh(SourceType.DOCKER)
 - **Issues:** https://github.com/tsoernes/mcp-registry/issues
 - **Discussions:** https://github.com/tsoernes/mcp-registry/discussions
 
+## Server Types
+
+### Podman Servers (Containerized)
+- Pre-built Docker images from Docker Hub
+- Run in isolated Podman containers
+- Require image pull before first use
+- Good for official/production servers
+
+### Stdio Servers (Direct)
+- npm packages (via `npx`)
+- Python packages (via `python -m`)
+- Run directly on your system
+- Automatically added to editor config
+- Good for development and lightweight servers
+
+### Editor Integration
+
+**Supported Editors:**
+- **Zed**: Config at `~/.config/zed/settings.json` (uses `context_servers`)
+- **Claude Desktop**: Config at `~/Library/Application Support/Claude/` (uses `mcpServers`)
+
+The registry automatically:
+1. Detects npm/pypi packages from server metadata
+2. Generates appropriate command configuration
+3. Edits your editor's JSON config file
+4. Creates backup before modification
+5. Preserves existing server configurations
+
 ## What's Next?
 
 This is version 0.1.0 with core functionality. Coming soon:
@@ -315,6 +365,7 @@ This is version 0.1.0 with core functionality. Coming soon:
 - Automatic image building from source repositories
 - Code-mode tool composition
 - Additional registry sources
+- Additional editor support (VS Code, etc.)
 - WebUI for exploration
 - Docker Compose examples
 
