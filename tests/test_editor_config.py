@@ -29,12 +29,12 @@ def editor_manager(temp_config_dir, monkeypatch):
     monkeypatch.setattr(
         EditorConfigManager,
         "get_zed_config_path",
-        lambda: temp_config_dir["zed"],
+        lambda self: temp_config_dir["zed"],
     )
     monkeypatch.setattr(
         EditorConfigManager,
         "get_claude_config_path",
-        lambda: temp_config_dir["claude"],
+        lambda self: temp_config_dir["claude"],
     )
 
     return manager
