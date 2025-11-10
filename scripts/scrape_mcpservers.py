@@ -743,7 +743,7 @@ async def _scrape_detail_pages_async(
 
 def scrape_all_servers(
     limit: int | None = None,
-    concurrency: int = 10,
+    concurrency: int = 20,
     cache_dir: str | None = None,
     meta_cache_dir: str | None = None,
     resume: bool = False,
@@ -1266,8 +1266,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=10,
-        help="Number of concurrent HTTP requests for detail pages (default: 10)",
+        default=20,
+        help="Number of concurrent HTTP requests for detail pages (default: 20)",
     )
     parser.add_argument(
         "--http2",
