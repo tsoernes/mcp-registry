@@ -1275,9 +1275,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Discover server URLs via sitemap.xml instead of the /all listing",
     )
-    parser.add_argument(
-        "--
-    parser.add_argument(
+
         "--sitemap-url",
         type=str,
         default=f"{BASE_URL}/sitemap.xml",
