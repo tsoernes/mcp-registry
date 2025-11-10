@@ -870,9 +870,7 @@ def scrape_all_servers(
                     category_map.setdefault(u, [])
                     if page_category_name0 not in category_map[u]:
                         category_map[u].append(page_category_name0)
-                    if len(official_map) < 10 and re.search(
-                        r"\bofficial\b", textify(container), flags=re.I
-                    ):
+                    if re.search(r"\bofficial\b", textify(container), flags=re.I):
                         official_map.add(u)
                 # Iterate remaining pages 2..max_page
                 for page in range(2, max_page + 1):
@@ -900,7 +898,7 @@ def scrape_all_servers(
                             category_map.setdefault(u, [])
                             if page_category_name0 not in category_map[u]:
                                 category_map[u].append(page_category_name0)
-                            if len(official_map) < 10 and re.search(
+                            if re.search(
                                 r"\bofficial\b", textify(container), flags=re.I
                             ):
                                 official_map.add(u)
