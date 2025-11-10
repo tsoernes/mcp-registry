@@ -1,5 +1,6 @@
 """MCP Registry Server - Dynamic multi-source MCP registry with Podman support."""
 
+from .editor_config import EditorConfigManager
 from .models import (
     ActiveMount,
     ConfigSetRequest,
@@ -7,6 +8,7 @@ from .models import (
     RegistryEntry,
     RegistryStatus,
     SearchQuery,
+    ServerCommand,
     SourceRefreshStatus,
     SourceType,
 )
@@ -20,10 +22,12 @@ __version__ = "0.1.0"
 __all__ = [
     "ActiveMount",
     "ConfigSetRequest",
+    "EditorConfigManager",
     "LaunchMethod",
     "RegistryEntry",
     "RegistryStatus",
     "SearchQuery",
+    "ServerCommand",
     "SourceRefreshStatus",
     "SourceType",
     "PodmanRunner",

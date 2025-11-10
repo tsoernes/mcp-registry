@@ -10,7 +10,7 @@ sys.path.insert(0, str(scripts_dir))
 
 from scrape_mcpservers import ServerInfo, scrape_all_servers
 
-from ..models import LaunchMethod, RegistryEntry, SourceType
+from ..models import LaunchMethod, RegistryEntry, ServerCommand, SourceType
 
 logger = logging.getLogger(__name__)
 
@@ -30,23 +30,42 @@ def _normalize_server_info(server: ServerInfo) -> RegistryEntry:
         # Fallback to name-based ID
         entry_id = server.name.lower().replace(" ", "-").replace("_", "-")
 
-    # Determine launch method
+    # Determine launch method and command configuration
     launch_method = LaunchMethod.UNKNOWN
-    if server.github_url:
-        # Could be built into container or run via stdio
-        launch_method = LaunchMethod.PODMAN  # Default assumption
-
-    # Normalize container image reference if possible
     container_image = None
-    if server.github_url:
+    server_command = None
+
+    # Check for npm package (npx-based servers)
+    if server.npm_package:
+        launch_method = LaunchMethod.STDIO_PROXY
+        server_command = ServerCommand(
+            command="npx",
+            args=["-y", server.npm_package],
+            env={},
+        )
+    # Check for Python package (python-based servers)
+    elif server.pypi_package:
+        launch_method = LaunchMethod.STDIO_PROXY
+        server_command = ServerCommand(
+            command="python",
+            args=["-m", server.pypi_package],
+            env={},
+        )
+    # Check for GitHub repo (might have container or be source-based)
+    elif server.github_url:
         # Try to infer Docker Hub image from GitHub URL
-        # Pattern: github.com/org/repo -> docker.io/org/repo or mcp/repo
+        # Pattern: github.com/org/repo -> docker.io/mcp/repo
         try:
             parts = server.github_url.replace("https://github.com/", "").split("/")
             if len(parts) >= 2:
                 org, repo = parts[0], parts[1]
-                # Check if it might be in mcp/ namespace
-                container_image = f"docker.io/mcp/{repo}"
+                # Check if it might be in mcp/ namespace (official)
+                if server.official:
+                    container_image = f"docker.io/mcp/{repo}"
+                    launch_method = LaunchMethod.PODMAN
+                else:
+                    # Assume stdio-proxy for non-official GitHub repos
+                    launch_method = LaunchMethod.STDIO_PROXY
         except Exception:
             pass
 
@@ -64,6 +83,7 @@ def _normalize_server_info(server: ServerInfo) -> RegistryEntry:
         requires_api_key=server.requires_api_key or False,
         tools=[],  # Will be discovered on activation
         launch_method=launch_method,
+        server_command=server_command,
         raw_metadata={
             "url": server.url,
             "npm_package": server.npm_package,

@@ -7,6 +7,24 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
+class ServerCommand(BaseModel):
+    """Command configuration for running an MCP server via stdio."""
+
+    command: str = Field(
+        ..., description="Command to execute (e.g., 'npx', 'python', 'node')"
+    )
+    args: list[str] = Field(
+        default_factory=list,
+        description="Command arguments (e.g., ['-y', '@modelcontextprotocol/server-filesystem'])",
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables for the server process",
+    )
+
+    model_config = {"frozen": False}
+
+
 class SourceType(str, Enum):
     """Registry source types."""
 
@@ -88,6 +106,11 @@ class RegistryEntry(BaseModel):
         if "/" not in v and ":" not in v:
             raise ValueError(f"Invalid container image format: {v}")
         return v
+
+    server_command: ServerCommand | None = Field(
+        None,
+        description="Command configuration for stdio-based servers (alternative to containers)",
+    )
 
     model_config = {"frozen": False, "extra": "ignore"}
 

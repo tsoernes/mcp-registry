@@ -8,6 +8,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from pydantic import Field
 
+from .editor_config import EditorConfigManager
 from .models import (
     ActiveMount,
     ConfigSetRequest,
@@ -49,11 +50,12 @@ mcp = FastMCP(
 registry: Registry | None = None
 podman_runner: PodmanRunner | None = None
 refresh_scheduler: RefreshScheduler | None = None
+editor_manager: EditorConfigManager | None = None
 
 
 async def initialize_registry() -> None:
     """Initialize registry and start background tasks."""
-    global registry, podman_runner, refresh_scheduler
+    global registry, podman_runner, refresh_scheduler, editor_manager
 
     if registry is not None:
         return  # Already initialized
@@ -69,6 +71,9 @@ async def initialize_registry() -> None:
 
     # Create Podman runner
     podman_runner = PodmanRunner()
+
+    # Create editor config manager
+    editor_manager = EditorConfigManager()
 
     # Create and start refresh scheduler
     refresh_scheduler = RefreshScheduler(registry)
@@ -226,21 +231,34 @@ async def registry_list(
 @mcp.tool()
 async def registry_add(
     entry_id: str = Field(..., description="Registry entry ID to activate"),
+    editor: str = Field(
+        ...,
+        description="Editor to configure (required for non-Podman servers): 'zed' or 'claude'",
+    ),
     prefix: str | None = Field(
         None, description="Tool prefix for namespacing (default: auto-generated)"
     ),
 ) -> str:
     """Activate an MCP server from the registry.
 
-    This tool pulls the container image (if needed) and starts the server using Podman.
-    The server's tools will be available with the specified prefix.
+    For Podman servers: Pulls the container image and starts the server.
+    For stdio servers: Adds the server to the specified editor's config file.
+
+    Args:
+        entry_id: Registry entry ID to activate
+        editor: Editor to configure ('zed' or 'claude') - required for non-Podman servers
+        prefix: Optional tool prefix for namespacing
 
     Returns:
-        Confirmation message with mount details
+        Confirmation message with activation details
     """
     await initialize_registry()
 
-    # Check if already active
+    # Validate editor
+    if editor.lower() not in ["zed", "claude"]:
+        return f"Invalid editor: {editor}. Supported editors: zed, claude"
+
+    # Check if already active (for Podman servers)
     existing = await registry.get_active_mount(entry_id)
     if existing:
         return f"Server already active: {existing.name} (prefix: {existing.prefix})"
@@ -257,7 +275,7 @@ async def registry_add(
 
     # Check launch method
     if entry.launch_method == LaunchMethod.PODMAN and entry.container_image:
-        # Pull image
+        # Podman-based server
         pull_success = await podman_runner.pull_image(entry.container_image)
         if not pull_success:
             return f"Failed to pull image: {entry.container_image}"
@@ -287,6 +305,7 @@ async def registry_add(
 
         return f"""Successfully activated: {entry.name}
 
+**Type:** Podman container
 **Container ID:** {container_id[:12]}
 **Prefix:** {prefix}
 **Image:** {entry.container_image}
@@ -295,14 +314,70 @@ Use `registry-config-set` to configure environment variables.
 Use `registry-exec` to run tools from this server.
 """
 
+    elif entry.server_command or entry.launch_method == LaunchMethod.STDIO_PROXY:
+        # Stdio-based server - add to editor config
+        if not entry.server_command:
+            return f"Server {entry.name} is marked as stdio but has no command configuration. Unable to add to editor."
+
+        # Add to editor configuration
+        try:
+            if editor.lower() == "zed":
+                result = editor_manager.add_zed_server(
+                    server_name=prefix,
+                    command=entry.server_command.command,
+                    args=entry.server_command.args,
+                    env=entry.server_command.env,
+                )
+            elif editor.lower() == "claude":
+                result = editor_manager.add_claude_server(
+                    server_name=prefix,
+                    command=entry.server_command.command,
+                    args=entry.server_command.args,
+                    env=entry.server_command.env,
+                )
+            else:
+                return f"Unsupported editor: {editor}"
+
+            # Create active mount record (non-container)
+            mount = ActiveMount(
+                entry_id=entry.id,
+                name=entry.name,
+                prefix=prefix,
+                container_id=None,
+                pid=None,
+                environment=entry.server_command.env,
+                tools=[],
+            )
+            await registry.add_active_mount(mount)
+
+            return f"""Successfully activated: {entry.name}
+
+**Type:** Stdio server
+**Editor:** {editor}
+**Command:** {entry.server_command.command}
+**Args:** {" ".join(entry.server_command.args)}
+
+{result}
+"""
+        except Exception as e:
+            logger.error(f"Failed to add server to {editor} config: {e}", exc_info=True)
+            return f"Failed to add server to {editor} configuration: {e}"
+
     elif entry.repo_url:
-        # TODO: Build and run from source
-        return f"Source-based servers not yet supported. Please use a pre-built container image."
+        # Source-based servers need command configuration
+        return f"""Server {entry.name} requires manual setup from source.
+
+**Repository:** {entry.repo_url}
+
+To use this server:
+1. Clone the repository
+2. Follow installation instructions
+3. Manually add to your {editor} configuration
+4. Use `registry-config-set` if needed
+"""
 
     else:
-        return (
-            f"Unable to activate {entry.name}: no container image or source repository"
-        )
+        return f"Unable to activate {entry.name}: no container image, command configuration, or source repository"
 
 
 @mcp.tool()
