@@ -1,5 +1,6 @@
 """Wrapper for mcpservers.org scraper with normalization to RegistryEntry format."""
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -115,20 +116,24 @@ async def scrape_mcpservers_org(
     """
     logger.info(f"Scraping mcpservers.org (concurrency={concurrency}, limit={limit})")
 
-    # Call the existing scraper
-    servers = scrape_all_servers(
-        limit=limit,
-        concurrency=concurrency,
-        cache_dir=cache_dir or ".cache/html",
-        meta_cache_dir=cache_dir or ".cache/meta",
-        resume=use_cache,
-        force_refresh=not use_cache,
-        use_categories=True,  # Always use categories for rich metadata
-        use_sitemap=False,
-        http2=False,
-        max_connections=128,
-        max_keepalive=32,
-        strict_official=False,
+    # Call the existing scraper in executor to avoid blocking event loop
+    loop = asyncio.get_event_loop()
+    servers = await loop.run_in_executor(
+        None,
+        lambda: scrape_all_servers(
+            limit=limit,
+            concurrency=concurrency,
+            cache_dir=cache_dir or ".cache/html",
+            meta_cache_dir=cache_dir or ".cache/meta",
+            resume=use_cache,
+            force_refresh=not use_cache,
+            use_categories=True,  # Always use categories for rich metadata
+            use_sitemap=False,
+            http2=False,
+            max_connections=128,
+            max_keepalive=32,
+            strict_official=False,
+        ),
     )
 
     logger.info(f"Scraped {len(servers)} servers from mcpservers.org")
