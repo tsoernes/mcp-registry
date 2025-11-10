@@ -867,10 +867,11 @@ def scrape_all_servers(
                     category_links.add(u)
                     # Nearest container for badge detection
                     container = a.find_parent(["li", "article", "div"]) or a
-                    category_map.setdefault(u, [])
-                    if page_category_name0 not in category_map[u]:
-                        category_map[u].append(page_category_name0)
-                    if re.search(r"\bofficial\b", textify(container), flags=re.I):
+                    if slug != "official":
+                        category_map.setdefault(u, [])
+                        if page_category_name0 not in category_map[u]:
+                            category_map[u].append(page_category_name0)
+                    if slug == "official":
                         official_map.add(u)
                 # Iterate remaining pages 2..max_page
                 for page in range(2, max_page + 1):
@@ -895,12 +896,11 @@ def scrape_all_servers(
                                 continue
                             category_links.add(u)
                             container = a.find_parent(["li", "article", "div"]) or a
-                            category_map.setdefault(u, [])
-                            if page_category_name0 not in category_map[u]:
-                                category_map[u].append(page_category_name0)
-                            if re.search(
-                                r"\bofficial\b", textify(container), flags=re.I
-                            ):
+                            if slug != "official":
+                                category_map.setdefault(u, [])
+                                if page_category_name0 not in category_map[u]:
+                                    category_map[u].append(page_category_name0)
+                            if slug == "official":
                                 official_map.add(u)
                     except Exception:
                         # Continue to next page on error
