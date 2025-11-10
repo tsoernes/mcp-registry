@@ -377,3 +377,61 @@ async def test_get_entries_by_source(registry, sample_entries):
     assert len(mcpservers_entries) > 0
     assert all(e.source == SourceType.DOCKER for e in docker_entries)
     assert all(e.source == SourceType.MCPSERVERS for e in mcpservers_entries)
+
+
+@pytest.mark.asyncio
+async def test_search_popularity_sorting(registry, sample_entries):
+    """Test that search results are sorted by popularity."""
+    await registry.bulk_add_entries(sample_entries)
+
+    # Search without text query should sort by popularity
+    query = SearchQuery(query="", limit=10)
+    results = await registry.search(query)
+
+    # Official and featured servers should appear first
+    # postgres is official=True, featured=True
+    # slack is official=False, featured=True
+    # filesystem is official=False, featured=False
+    assert results[0].name == "PostgreSQL MCP Server"  # official + featured
+    assert results[1].name == "Slack MCP Server"  # featured only
+
+
+@pytest.mark.asyncio
+async def test_search_fuzzy_with_popularity(registry, sample_entries):
+    """Test that search combines fuzzy matching with popularity."""
+    await registry.bulk_add_entries(sample_entries)
+
+    # Search for "server" - all match, but should be sorted by popularity
+    query = SearchQuery(query="server", limit=10)
+    results = await registry.search(query)
+
+    # With fuzzy match, all should match but official/featured rank higher
+    assert len(results) > 0
+    # Official servers should rank higher in results
+    official_indices = [i for i, r in enumerate(results) if r.official]
+    if official_indices:
+        # At least one official server should be in top half of results
+        assert min(official_indices) < len(results) / 2
+
+
+@pytest.mark.asyncio
+async def test_popularity_score_calculation(registry, sample_entries):
+    """Test the popularity score calculation."""
+    await registry.bulk_add_entries(sample_entries)
+
+    # Get the entries
+    postgres = await registry.get_entry("docker/postgres")
+    filesystem = await registry.get_entry("mcpservers/filesystem")
+    slack = await registry.get_entry("mcpservers/slack")
+
+    # Calculate popularity scores
+    postgres_score = registry._calculate_popularity_score(postgres)
+    filesystem_score = registry._calculate_popularity_score(filesystem)
+    slack_score = registry._calculate_popularity_score(slack)
+
+    # PostgreSQL (official + featured + docker source + container image) should rank highest
+    assert postgres_score > filesystem_score
+    assert postgres_score > slack_score
+
+    # Slack (featured but not official) should rank higher than filesystem
+    assert slack_score > filesystem_score

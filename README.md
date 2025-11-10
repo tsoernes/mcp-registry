@@ -18,6 +18,7 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 
 - **Multi-source aggregation**: Unified search across Docker registry, mcpservers.org, and more
 - **Fuzzy search**: Find servers by name, description, tags, or categories using intelligent matching
+- **Popularity ranking**: Search results sorted by relevance + popularity (official, featured, categories)
 - **Dynamic activation**: Add/remove MCP servers on-demand during a session
 - **Podman integration**: Run containerized MCP servers using Podman (rootless compatible)
 - **Stdio server support**: Automatically configure npm/npx/python-based servers in editor configs
@@ -30,7 +31,7 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 
 The server exposes the following tools to AI agents:
 
-- `registry-find`: Search for MCP servers by name, description, tags, or categories
+- `registry-find`: Search for MCP servers by name, description, tags, or categories (sorted by popularity)
 - `registry-list`: List all available servers in the aggregated registry
 - `registry-add`: Activate an MCP server (Podman container or editor config)
 - `registry-remove`: Deactivate a previously added server
@@ -140,13 +141,23 @@ Each registry entry includes:
 - `container_image`: Docker/Podman image reference
 - `categories`: Functional categories
 - `tags`: Searchable tags
-- `official`: Official status (from mcpservers.org)
-- `featured`: Featured status (from mcpservers.org)
+- `official`: Official status (from mcpservers.org) - boosts search ranking
+- `featured`: Featured status (from mcpservers.org) - boosts search ranking
 - `requires_api_key`: Whether API credentials are needed
 - `tools`: Available tool names (discovered on activation)
-launch_method: How to run (podman, stdio-proxy, remote-http)
-server_command: Command configuration for stdio servers (command, args, env)
-last_refreshed: Last metadata update timestamp
+- `launch_method`: How to run (podman, stdio-proxy, remote-http)
+- `server_command`: Command configuration for stdio servers (command, args, env)
+- `last_refreshed`: Last metadata update timestamp
+
+### Search Ranking
+
+Search results are sorted by a combination of:
+- **Fuzzy match score** (60% weight): How well the query matches the server name/description
+- **Popularity score** (40% weight): Based on official status, featured status, number of categories, and source
+- Official servers get +20 points
+- Featured servers get +10 points
+- Docker registry servers get +5 points
+- Servers with container images get +3 points
 
 ## Configuration
 

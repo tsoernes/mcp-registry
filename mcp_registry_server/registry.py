@@ -199,14 +199,50 @@ class Registry:
         """
         return self._entries.get(entry_id)
 
+    def _calculate_popularity_score(self, entry: RegistryEntry) -> float:
+        """Calculate a popularity score for ranking search results.
+
+        Args:
+            entry: Registry entry to score
+
+        Returns:
+            Popularity score (higher is better)
+        """
+        score = 0.0
+
+        # Official servers get a significant boost
+        if entry.official:
+            score += 20.0
+
+        # Featured servers get a moderate boost
+        if entry.featured:
+            score += 10.0
+
+        # More categories suggests a well-maintained server
+        score += min(len(entry.categories), 3) * 2.0
+
+        # Source-based scoring (official sources rank higher)
+        if entry.source == SourceType.DOCKER:
+            score += 5.0
+
+        # Servers with container images are typically more production-ready
+        if entry.container_image:
+            score += 3.0
+
+        return score
+
     async def search(self, query: SearchQuery) -> list[RegistryEntry]:
         """Search registry entries with fuzzy matching and filters.
+
+        Results are sorted by a combination of:
+        - Fuzzy match score (primary factor)
+        - Popularity metrics (official, featured, categories)
 
         Args:
             query: Search parameters
 
         Returns:
-            List of matching entries (limited by query.limit)
+            List of matching entries sorted by relevance and popularity
         """
         candidates = list(self._entries.values())
 
@@ -237,7 +273,7 @@ class Registry:
                 e for e in candidates if e.requires_api_key == query.requires_api_key
             ]
 
-        # Fuzzy text search
+        # Fuzzy text search with popularity ranking
         if query.query.strip():
             scored_results: list[tuple[RegistryEntry, float]] = []
             seen_ids = set()
@@ -258,14 +294,26 @@ class Registry:
                 if entry.id in seen_ids:
                     continue
                 if entry in candidates:  # Must pass filters
-                    scored_results.append((entry, score))
+                    # Combine fuzzy match score with popularity score
+                    # Fuzzy score is 0-100, popularity is 0-40+
+                    # Weight fuzzy match more heavily (60%) vs popularity (40%)
+                    fuzzy_weight = 0.6
+                    popularity_score = self._calculate_popularity_score(entry)
+                    combined_score = (score * fuzzy_weight) + (
+                        popularity_score * (1 - fuzzy_weight)
+                    )
+
+                    scored_results.append((entry, combined_score))
                     seen_ids.add(entry.id)
 
-            # Sort by score descending
+            # Sort by combined score descending
             scored_results.sort(key=lambda x: x[1], reverse=True)
             results = [entry for entry, _ in scored_results[: query.limit]]
         else:
-            # No text query, just return filtered results
+            # No text query, sort by popularity only
+            candidates.sort(
+                key=lambda e: self._calculate_popularity_score(e), reverse=True
+            )
             results = candidates[: query.limit]
 
         return results
