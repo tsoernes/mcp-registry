@@ -755,6 +755,7 @@ def scrape_all_servers(
     http2: bool = False,
     max_connections: int = 128,
     max_keepalive: int = 32,
+    strict_official: bool = False,
 ) -> list[ServerInfo]:
     links: list[str]
     # Pre-pass: build category and official maps from category listing pages
@@ -784,7 +785,7 @@ def scrape_all_servers(
                             for c in v:
                                 if c not in category_map[k]:
                                     category_map[k].append(c)
-            if off_file.exists():
+            if off_file.exists() and not strict_official:
                 raw_off = json.loads(off_file.read_text(encoding="utf-8"))
                 if isinstance(raw_off, list):
                     official_map.update([u for u in raw_off if isinstance(u, str)])
@@ -792,8 +793,13 @@ def scrape_all_servers(
                 raw_feat = json.loads(feat_file.read_text(encoding="utf-8"))
                 if isinstance(raw_feat, list):
                     featured_set.update([u for u in raw_feat if isinstance(u, str)])
+            if strict_official:
+                logger.info("Strict official mode: ignoring persisted official_map; will recompute from /category/official pages (max 10 pages).")
+                official_map.clear()
         except Exception:
             logger.debug("Failed to load meta cache maps")
+        # Always rebuild official_map fresh (persisted values may be stale or overly broad)
+        official_map.clear()
     if use_categories:
         # Discover category slugs dynamically from the /all page
         try:
@@ -827,10 +833,13 @@ def scrape_all_servers(
                 slug = href.rstrip("/").split("/")[-1]
                 if slug:
                     cat_slugs.add(slug)
+            logger.info(f"Discovered category slugs: {sorted(cat_slugs)} (official present: {'official' in cat_slugs})")
         except Exception:
             cat_slugs = set()
         # For each category, paginate and collect server links + official badges
         for slug in sorted(cat_slugs):
+            # Log discovered slugs for debugging
+            logger.info(f"Discovered category slugs: {sorted(cat_slugs)}")
             # Determine max pagination page from first page, then iterate deterministically
             try:
                 first_url = f"{BASE_URL}/category/{slug}"
@@ -856,6 +865,14 @@ def scrape_all_servers(
                             max_page = max(max_page, int(m.group(1)))
                         except ValueError:
                             pass
+                # Restrict official category pagination to first 10 pages
+                if slug == "official":
+                    max_page = min(max_page, 10)
+                if slug == "official" and strict_official:
+                    # Limit official category pagination in strict mode
+                    original_max = max_page
+                    max_page = min(max_page, 10)
+                    logger.info(f"Strict official mode: limiting official pages from {original_max} to {max_page}")
                 # Process page 1 now
                 for a in main0.select('a[href^="/servers/"]'):
                     href = a.get("href", "")
@@ -867,12 +884,12 @@ def scrape_all_servers(
                     category_links.add(u)
                     # Nearest container for badge detection
                     container = a.find_parent(["li", "article", "div"]) or a
-                    if slug != "official":
+                    if slug == "official":
+                        official_map.add(u)
+                    else:
                         category_map.setdefault(u, [])
                         if page_category_name0 not in category_map[u]:
                             category_map[u].append(page_category_name0)
-                    if slug == "official":
-                        official_map.add(u)
                 # Iterate remaining pages 2..max_page
                 for page in range(2, max_page + 1):
                     cat_url = f"{BASE_URL}/category/{slug}?page={page}"
@@ -896,12 +913,12 @@ def scrape_all_servers(
                                 continue
                             category_links.add(u)
                             container = a.find_parent(["li", "article", "div"]) or a
-                            if slug != "official":
+                            if slug == "official":
+                                official_map.add(u)
+                            else:
                                 category_map.setdefault(u, [])
                                 if page_category_name0 not in category_map[u]:
                                     category_map[u].append(page_category_name0)
-                            if slug == "official":
-                                official_map.add(u)
                     except Exception:
                         # Continue to next page on error
                         continue
@@ -1035,6 +1052,7 @@ def scrape_all_servers(
             max_keepalive,
         )
     )
+    logger.info(f"Final official flag count: {sum(1 for s in servers if s.official)} (strict_official={strict_official})")
     # Persist again after successful scrape (may include newly discovered servers)
     if meta_dir_path:
         try:
@@ -1233,6 +1251,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Directory to store/read cached metadata maps (default: .cache/meta)",
     )
     parser.add_argument(
+        "--strict-official",
+        action="store_true",
+        help="Restrict official detection to first 10 pages of /category/official (ignore persisted official map)",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Resume by using cached HTML for already-scraped pages when available",
@@ -1252,6 +1275,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Discover server URLs via sitemap.xml instead of the /all listing",
     )
+    parser.add_argument(
+        "--
     parser.add_argument(
         "--sitemap-url",
         type=str,
@@ -1277,6 +1302,7 @@ def main(argv: list[str]) -> int:
         http2=args.http2,
         max_connections=args.max_connections,
         max_keepalive=args.max_keepalive,
+        strict_official=args.strict_official,
     )
 
     if args.output == "json":
