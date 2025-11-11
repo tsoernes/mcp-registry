@@ -21,6 +21,7 @@ from .models import (
 )
 from .podman_runner import PodmanRunner
 from .registry import Registry
+from .schema_converter import convert_tool_to_function, validate_tool_schema
 from .tasks import RefreshScheduler
 
 # Configure logging
@@ -327,42 +328,66 @@ async def registry_add(
             # Register client with manager
             mcp_client_manager.register_client(container_id, client, process)
 
-            # Dynamically register discovered tools with FastMCP
+            # Dynamically register discovered tools with FastMCP using schema converter
             registered_tool_names = []
+
+            # Create executor function that forwards to registry_exec
+            async def tool_executor(tool_name: str, arguments: dict[str, Any]) -> str:
+                """Execute a tool via the MCP client."""
+                # Get the MCP client for this container
+                client = mcp_client_manager.get_client(container_id)
+                if not client:
+                    return f"Error: MCP client not found for container {container_id}"
+
+                try:
+                    result = await client.call_tool(tool_name, arguments)
+                    return str(result)
+                except Exception as e:
+                    logger.error(
+                        f"Error executing tool {tool_name}: {e}", exc_info=True
+                    )
+                    return f"Error executing {tool_name}: {str(e)}"
+
             for tool in tools:
                 tool_name = tool.get("name", "")
-                tool_description = tool.get("description", "")
-                dynamic_tool_name = f"mcp_{prefix}_{tool_name}"
 
-                # Create a closure to capture the current tool_name and prefix
-                def make_tool_wrapper(actual_prefix: str, actual_tool: str):
-                    async def dynamic_tool_wrapper(**kwargs) -> str:
-                        """Dynamically registered tool from containerized MCP server."""
-                        # Forward to the MCP client
-                        return await registry_exec(
-                            tool_name=f"mcp_{actual_prefix}_{actual_tool}",
-                            arguments=kwargs,
-                        )
+                # Validate tool schema
+                is_valid, error_msg = validate_tool_schema(tool)
+                if not is_valid:
+                    logger.warning(
+                        f"Skipping tool {tool_name} due to invalid schema: {error_msg}"
+                    )
+                    continue
 
-                    return dynamic_tool_wrapper
-
-                # Create the wrapper function
-                wrapper_fn = make_tool_wrapper(prefix, tool_name)
-                wrapper_fn.__name__ = dynamic_tool_name
-                wrapper_fn.__doc__ = (
-                    tool_description or f"Tool {tool_name} from {entry.name}"
-                )
-
-                # Register with FastMCP
                 try:
-                    mcp.tool(name=dynamic_tool_name)(wrapper_fn)
-                    registered_tool_names.append(dynamic_tool_name)
-                    logger.info(f"Registered dynamic tool: {dynamic_tool_name}")
+                    # Convert tool definition to Python function with explicit parameters
+                    full_tool_name, dynamic_function = convert_tool_to_function(
+                        tool_definition=tool,
+                        prefix=prefix,
+                        executor=tool_executor,
+                    )
+
+                    # Register with FastMCP
+                    mcp.add_tool(dynamic_function)
+                    registered_tool_names.append(full_tool_name)
+                    logger.info(
+                        f"Registered dynamic tool: {full_tool_name} "
+                        f"(signature: {dynamic_function.__signature__})"
+                    )
+
                 except Exception as e:
-                    logger.warning(f"Failed to register tool {dynamic_tool_name}: {e}")
+                    logger.error(
+                        f"Failed to register tool {tool_name}: {e}", exc_info=True
+                    )
+                    # Continue with other tools even if one fails
 
             # Track registered tools for cleanup
             _dynamic_tools[container_id] = registered_tool_names
+
+            logger.info(
+                f"Successfully registered {len(registered_tool_names)} dynamic tools "
+                f"for {entry.name}"
+            )
 
         except asyncio.TimeoutError:
             logger.error(f"Timeout initializing MCP client for {entry.name}")
