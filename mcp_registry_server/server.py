@@ -55,6 +55,9 @@ refresh_scheduler: RefreshScheduler | None = None
 editor_manager: EditorConfigManager | None = None
 mcp_client_manager: MCPClientManager | None = None
 
+# Track dynamically registered tools for cleanup
+_dynamic_tools: dict[str, list[str]] = {}  # container_id -> [tool_names]
+
 
 async def initialize_registry() -> None:
     """Initialize registry and start background tasks."""
@@ -324,6 +327,43 @@ async def registry_add(
             # Register client with manager
             mcp_client_manager.register_client(container_id, client, process)
 
+            # Dynamically register discovered tools with FastMCP
+            registered_tool_names = []
+            for tool in tools:
+                tool_name = tool.get("name", "")
+                tool_description = tool.get("description", "")
+                dynamic_tool_name = f"mcp_{prefix}_{tool_name}"
+
+                # Create a closure to capture the current tool_name and prefix
+                def make_tool_wrapper(actual_prefix: str, actual_tool: str):
+                    async def dynamic_tool_wrapper(**kwargs) -> str:
+                        """Dynamically registered tool from containerized MCP server."""
+                        # Forward to the MCP client
+                        return await registry_exec(
+                            tool_name=f"mcp_{actual_prefix}_{actual_tool}",
+                            arguments=kwargs,
+                        )
+
+                    return dynamic_tool_wrapper
+
+                # Create the wrapper function
+                wrapper_fn = make_tool_wrapper(prefix, tool_name)
+                wrapper_fn.__name__ = dynamic_tool_name
+                wrapper_fn.__doc__ = (
+                    tool_description or f"Tool {tool_name} from {entry.name}"
+                )
+
+                # Register with FastMCP
+                try:
+                    mcp.tool(name=dynamic_tool_name)(wrapper_fn)
+                    registered_tool_names.append(dynamic_tool_name)
+                    logger.info(f"Registered dynamic tool: {dynamic_tool_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to register tool {dynamic_tool_name}: {e}")
+
+            # Track registered tools for cleanup
+            _dynamic_tools[container_id] = registered_tool_names
+
         except asyncio.TimeoutError:
             logger.error(f"Timeout initializing MCP client for {entry.name}")
             # Clean up
@@ -367,12 +407,14 @@ async def registry_add(
 **Image:** {entry.container_image}
 **Tools discovered:** {len(tool_names)}
 
-Available tools:
-{chr(10).join(f"  - {prefix}_{tool}" for tool in tool_names[:10])}
+Available tools (callable via MCP):
+{chr(10).join(f"  - mcp_{prefix}_{tool}" for tool in tool_names[:10])}
 {f"  ... and {len(tool_names) - 10} more" if len(tool_names) > 10 else ""}
 
+These tools are now directly available through this MCP server!
+You can call them by name (e.g., mcp_{prefix}_{tool_names[0] if tool_names else "toolname"})
+
 Use `registry-config-set` to configure environment variables (requires restart).
-Use `registry-exec` to run tools from this server.
 """
 
     elif entry.server_command or entry.launch_method == LaunchMethod.STDIO_PROXY:
@@ -457,6 +499,16 @@ async def registry_remove(
     mount = await registry.get_active_mount(entry_id)
     if not mount:
         return f"Server not active: {entry_id}"
+
+    # Remove dynamically registered tools
+    if mount.container_id and mount.container_id in _dynamic_tools:
+        for tool_name in _dynamic_tools[mount.container_id]:
+            try:
+                mcp.remove_tool(tool_name)
+                logger.info(f"Removed dynamic tool: {tool_name}")
+            except Exception as e:
+                logger.warning(f"Failed to remove tool {tool_name}: {e}")
+        del _dynamic_tools[mount.container_id]
 
     # Clean up MCP client if present
     if mount.container_id:
@@ -584,12 +636,20 @@ async def registry_exec(
     """
     await initialize_registry()
 
-    # Parse prefix from tool name
-    if "_" not in tool_name:
-        return f"Invalid tool name format. Expected: prefix_toolname, got: {tool_name}"
+    # Parse prefix from tool name (expecting mcp_prefix_toolname format)
+    if not tool_name.startswith("mcp_"):
+        return (
+            f"Invalid tool name format. Expected: mcp_prefix_toolname, got: {tool_name}"
+        )
 
-    prefix = tool_name.split("_")[0]
-    actual_tool_name = "_".join(tool_name.split("_")[1:])
+    parts = tool_name.split("_")
+    if len(parts) < 3:
+        return (
+            f"Invalid tool name format. Expected: mcp_prefix_toolname, got: {tool_name}"
+        )
+
+    prefix = parts[1]  # Extract prefix after "mcp_"
+    actual_tool_name = "_".join(parts[2:])  # Rest after prefix
 
     # Find active mount by prefix
     active_mounts = await registry.list_active_mounts()
@@ -610,10 +670,8 @@ async def registry_exec(
 
 Container: {mount.container_id[:12] if mount.container_id else "N/A"}
 
-Note: Current implementation requires containers to be started in interactive mode
-with MCP protocol support. This is a limitation of the current architecture.
-
-For now, please use the server's native tools directly or access via editor integration.
+The server may not be running or the connection was lost.
+Try removing and re-adding the server with registry_remove and registry_add.
 """
 
     # Execute tool via MCP client

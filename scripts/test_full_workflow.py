@@ -132,7 +132,8 @@ async def test_full_workflow():
         logger.info(f"✓ Active mount created with prefix: {prefix}")
 
         # Step 5: Execute tool - list_tables (simulating registry_exec)
-        logger.info("\n[5/7] Executing tool: list_tables...")
+        # Note: Tools are exposed with mcp_ prefix
+        logger.info("\n[5/7] Executing tool: mcp_sqlite_test_list_tables...")
         try:
             result = await asyncio.wait_for(
                 client.call_tool("list_tables", {}), timeout=10.0
@@ -147,7 +148,7 @@ async def test_full_workflow():
             return False
 
         # Step 6: Execute tool - create_table (write operation)
-        logger.info("\n[6/7] Executing tool: create_table...")
+        logger.info("\n[6/7] Executing tool: mcp_sqlite_test_create_table...")
         try:
             create_result = await asyncio.wait_for(
                 client.call_tool(
@@ -191,7 +192,9 @@ async def test_full_workflow():
         logger.info(f"  • Container: {container_id}")
         logger.info(f"  • Prefix: {prefix}")
         logger.info(f"  • Tools discovered: {len(tool_names)}")
-        logger.info(f"  • Tools executed: 3 (list_tables, create_table, list_tables)")
+        logger.info(
+            f"  • Tools executed: 3 (mcp_{prefix}_list_tables, mcp_{prefix}_create_table, mcp_{prefix}_list_tables)"
+        )
         logger.info(f"  • Active mount: {entry_id}")
         logger.info("=" * 70)
 
