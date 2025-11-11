@@ -290,21 +290,62 @@ async def registry_add(
 
     # Check launch method
     if entry.launch_method == LaunchMethod.PODMAN and entry.container_image:
-        # Podman-based server
+        # Podman-based server - use interactive mode for MCP stdio communication
         pull_success = await podman_runner.pull_image(entry.container_image)
         if not pull_success:
             return f"Failed to pull image: {entry.container_image}"
 
-        # Start container
+        # Start container in interactive mode for stdio communication
         container_name = f"mcp-registry-{prefix}"
-        container_id = await podman_runner.run_container(
+        container_id, process = await podman_runner.run_interactive_container(
             image=entry.container_image,
             name=container_name,
             environment={},  # Will be set via config-set
         )
 
-        if not container_id:
-            return f"Failed to start container for {entry.name}"
+        if not container_id or not process:
+            return f"Failed to start interactive container for {entry.name}"
+
+        # Create MCP client for this container
+        try:
+            client = MCPClient(process)
+
+            # Initialize the MCP connection
+            logger.info(f"Initializing MCP client for {entry.name}...")
+            capabilities = await asyncio.wait_for(client.initialize(), timeout=10.0)
+            logger.info(f"MCP client initialized: {capabilities}")
+
+            # Discover tools
+            logger.info(f"Discovering tools for {entry.name}...")
+            tools = await asyncio.wait_for(client.list_tools(), timeout=10.0)
+            tool_names = [tool.get("name", "unknown") for tool in tools]
+            logger.info(f"Discovered {len(tool_names)} tools: {tool_names}")
+
+            # Register client with manager
+            mcp_client_manager.register_client(container_id, client, process)
+
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout initializing MCP client for {entry.name}")
+            # Clean up
+            if process:
+                try:
+                    process.kill()
+                    await process.wait()
+                except Exception as e:
+                    logger.warning(f"Error killing process: {e}")
+            return f"Failed to initialize MCP client for {entry.name}: timeout"
+        except Exception as e:
+            logger.error(
+                f"Error initializing MCP client for {entry.name}: {e}", exc_info=True
+            )
+            # Clean up
+            if process:
+                try:
+                    process.kill()
+                    await process.wait()
+                except Exception as e:
+                    logger.warning(f"Error killing process: {e}")
+            return f"Failed to initialize MCP client for {entry.name}: {str(e)}"
 
         # Create active mount
         mount = ActiveMount(
@@ -313,19 +354,24 @@ async def registry_add(
             prefix=prefix,
             container_id=container_id,
             environment={},
-            tools=[],  # Will be discovered
+            tools=tool_names,  # Store discovered tools
         )
 
         await registry.add_active_mount(mount)
 
         return f"""Successfully activated: {entry.name}
 
-**Type:** Podman container
-**Container ID:** {container_id[:12]}
+**Type:** Podman container (interactive/stdio mode)
+**Container ID:** {container_id}
 **Prefix:** {prefix}
 **Image:** {entry.container_image}
+**Tools discovered:** {len(tool_names)}
 
-Use `registry-config-set` to configure environment variables.
+Available tools:
+{chr(10).join(f"  - {prefix}_{tool}" for tool in tool_names[:10])}
+{f"  ... and {len(tool_names) - 10} more" if len(tool_names) > 10 else ""}
+
+Use `registry-config-set` to configure environment variables (requires restart).
 Use `registry-exec` to run tools from this server.
 """
 
@@ -412,8 +458,14 @@ async def registry_remove(
     if not mount:
         return f"Server not active: {entry_id}"
 
-    # Stop container if running
+    # Clean up MCP client if present
     if mount.container_id:
+        logger.info(f"Cleaning up MCP client for {mount.container_id}")
+        await mcp_client_manager.remove_client(mount.container_id)
+
+    # Stop container if running (for detached containers)
+    # Interactive containers will stop when the MCP client is closed
+    if mount.container_id and not mount.container_id.startswith("interactive-"):
         stopped = await podman_runner.stop_container(mount.container_id)
         if not stopped:
             # Try force kill
