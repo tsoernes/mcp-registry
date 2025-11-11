@@ -248,7 +248,6 @@ async def read_query(
 # Activate SQLite server
 result = await registry_add(
     entry_id="docker/sqlite",
-    editor="zed",
     prefix="sqlite"
 )
 

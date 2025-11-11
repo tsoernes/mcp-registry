@@ -63,9 +63,7 @@ async def test_dynamic_tool_registration():
         logger.info(f"\n[3/8] Activating MCP server: {entry_id}...")
         # Get the tool and call its underlying function
         registry_add_tool = await mcp.get_tool("registry_add")
-        result = await registry_add_tool.fn(
-            entry_id=entry_id, editor="zed", prefix=prefix
-        )
+        result = await registry_add_tool.fn(entry_id=entry_id, prefix=prefix)
         logger.info(f"✓ Server activated:\n{result}")
 
         # Get tools after activation

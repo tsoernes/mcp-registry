@@ -9,7 +9,6 @@ from typing import Any
 from fastmcp import FastMCP
 from pydantic import Field
 
-from .editor_config import EditorConfigManager
 from .mcp_client import MCPClient, MCPClientManager
 from .models import (
     ActiveMount,
@@ -53,7 +52,6 @@ mcp = FastMCP(
 registry: Registry | None = None
 podman_runner: PodmanRunner | None = None
 refresh_scheduler: RefreshScheduler | None = None
-editor_manager: EditorConfigManager | None = None
 mcp_client_manager: MCPClientManager | None = None
 
 # Track dynamically registered tools for cleanup
@@ -62,12 +60,7 @@ _dynamic_tools: dict[str, list[str]] = {}  # container_id -> [tool_names]
 
 async def initialize_registry() -> None:
     """Initialize registry and start background tasks."""
-    global \
-        registry, \
-        podman_runner, \
-        refresh_scheduler, \
-        editor_manager, \
-        mcp_client_manager
+    global registry, podman_runner, refresh_scheduler, mcp_client_manager
 
     if registry is not None:
         return  # Already initialized
@@ -83,9 +76,6 @@ async def initialize_registry() -> None:
 
     # Create Podman runner
     podman_runner = PodmanRunner()
-
-    # Create editor config manager
-    editor_manager = EditorConfigManager()
 
     # Create MCP client manager
     mcp_client_manager = MCPClientManager()
@@ -250,32 +240,23 @@ async def registry_list(
 @mcp.tool()
 async def registry_add(
     entry_id: str = Field(..., description="Registry entry ID to activate"),
-    editor: str = Field(
-        ...,
-        description="Editor to configure (required for non-Podman servers): 'zed' or 'claude'",
-    ),
     prefix: str | None = Field(
         None, description="Tool prefix for namespacing (default: auto-generated)"
     ),
 ) -> str:
     """Activate an MCP server from the registry.
 
-    For Podman servers: Pulls the container image and starts the server.
-    For stdio servers: Adds the server to the specified editor's config file.
+    Pulls the container image, starts the server, and dynamically registers
+    discovered tools as callable MCP tools.
 
     Args:
         entry_id: Registry entry ID to activate
-        editor: Editor to configure ('zed' or 'claude') - required for non-Podman servers
-        prefix: Optional tool prefix for namespacing
+        prefix: Optional tool prefix for namespacing (default: auto-generated)
 
     Returns:
         Confirmation message with activation details
     """
     await initialize_registry()
-
-    # Validate editor
-    if editor.lower() not in ["zed", "claude"]:
-        return f"Invalid editor: {editor}. Supported editors: zed, claude"
 
     # Check if already active (for Podman servers)
     existing = await registry.get_active_mount(entry_id)
@@ -442,70 +423,18 @@ You can call them by name (e.g., mcp_{prefix}_{tool_names[0] if tool_names else 
 Use `registry-config-set` to configure environment variables (requires restart).
 """
 
-    elif entry.server_command or entry.launch_method == LaunchMethod.STDIO_PROXY:
-        # Stdio-based server - add to editor config
-        if not entry.server_command:
-            return f"Server {entry.name} is marked as stdio but has no command configuration. Unable to add to editor."
-
-        # Add to editor configuration
-        try:
-            if editor.lower() == "zed":
-                result = editor_manager.add_zed_server(
-                    server_name=prefix,
-                    command=entry.server_command.command,
-                    args=entry.server_command.args,
-                    env=entry.server_command.env,
-                )
-            elif editor.lower() == "claude":
-                result = editor_manager.add_claude_server(
-                    server_name=prefix,
-                    command=entry.server_command.command,
-                    args=entry.server_command.args,
-                    env=entry.server_command.env,
-                )
-            else:
-                return f"Unsupported editor: {editor}"
-
-            # Create active mount record (non-container)
-            mount = ActiveMount(
-                entry_id=entry.id,
-                name=entry.name,
-                prefix=prefix,
-                container_id=None,
-                pid=None,
-                environment=entry.server_command.env,
-                tools=[],
-            )
-            await registry.add_active_mount(mount)
-
-            return f"""Successfully activated: {entry.name}
-
-**Type:** Stdio server
-**Editor:** {editor}
-**Command:** {entry.server_command.command}
-**Args:** {" ".join(entry.server_command.args)}
-
-{result}
-"""
-        except Exception as e:
-            logger.error(f"Failed to add server to {editor} config: {e}", exc_info=True)
-            return f"Failed to add server to {editor} configuration: {e}"
-
-    elif entry.repo_url:
-        # Source-based servers need command configuration
-        return f"""Server {entry.name} requires manual setup from source.
-
-**Repository:** {entry.repo_url}
-
-To use this server:
-1. Clone the repository
-2. Follow installation instructions
-3. Manually add to your {editor} configuration
-4. Use `registry-config-set` if needed
-"""
-
     else:
-        return f"Unable to activate {entry.name}: no container image, command configuration, or source repository"
+        return f"""Unable to activate {entry.name}: Only Podman container-based servers are currently supported for dynamic tool exposure.
+
+**Entry ID:** {entry_id}
+**Launch Method:** {entry.launch_method.value if entry.launch_method else "unknown"}
+
+Supported launch methods:
+- PODMAN (with container image)
+
+Note: Stdio-based servers and source-based servers are not yet supported for automatic activation.
+You can manually configure them in your MCP client if needed.
+"""
 
 
 @mcp.tool()

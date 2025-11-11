@@ -265,7 +265,6 @@ result = await registry_exec(
 # Activate server - tools are auto-registered
 await registry_add(
     entry_id="docker/sqlite",
-    editor="zed",
     prefix="sqlite"
 )
 

@@ -128,17 +128,11 @@ Show me servers from the Docker registry
 
 ### 4. Activate a server
 
-For Podman-based servers (containers):
 ```
-Add the postgres MCP server to Claude Desktop
-```
-
-For stdio-based servers (npm/python packages):
-```
-Add the filesystem server to Zed
+Add the SQLite MCP server
 ```
 
-Note: The `editor` parameter is required. Podman servers will pull and run as containers. Stdio servers will be automatically added to your editor's config file.
+Note: Only Podman-based container servers are currently supported. The server will pull the container image, start it, discover available tools, and automatically register them as callable MCP functions.
 
 ### 5. List active servers
 
@@ -164,15 +158,18 @@ The registry provides these tools:
 
 - **registry-find**: Search for servers (fuzzy matching, filters)
 - **registry-list**: Browse all available servers
-- **registry-add**: Activate a server (Podman container or editor config)
-  - For containers: pulls image and starts container
-  - For stdio: adds to Zed or Claude Desktop config
-- **registry-remove**: Deactivate a server (stops container or removes from config)
+- **registry-add**: Activate a Podman container server with dynamic tool registration
+  - Pulls container image and starts container
+  - Discovers available tools via MCP protocol
+  - Automatically registers tools as callable functions (e.g., `mcp_sqlite_read_query`)
+- **registry-remove**: Deactivate a server (stops container and unregisters tools)
 - **registry-active**: List currently running servers
 - **registry-config-set**: Configure environment variables
-- **registry-exec**: Execute tools from active servers (coming soon)
 - **registry-refresh**: Force refresh a data source
 - **registry-status**: View diagnostics and statistics
+- **Dynamic tools**: When you activate a server, its tools become directly callable
+  - Example: After activating SQLite, you can call `mcp_sqlite_read_query(query="SELECT * FROM users")`
+  - Full type safety and IDE support
 
 ## Data Sources
 
@@ -181,13 +178,13 @@ The registry aggregates servers from:
 1. **Docker MCP Registry** (official Docker catalog)
    - Cloned from https://github.com/docker/mcp-registry
    - Auto-refreshed every 24 hours
-   - Mostly Podman-based container images
+   - Podman-based container images
 
 2. **mcpservers.org** (community catalog)
    - Scraped from https://mcpservers.org
    - Auto-refreshed every 24 hours
    - Includes official/featured flags, categories, tags
-   - Mix of Podman containers and stdio servers (npm/python packages)
+   - Podman container servers
 
 ## Cache and Data Storage
 
@@ -241,13 +238,21 @@ Refresh all registry sources
 
 3. Try removing and re-adding the server
 
-### Stdio server not showing in editor
+### Dynamic tools not appearing
 
-1. Check that the config file was modified:
-   - Zed: `~/.config/zed/settings.json`
-   - Claude: `~/Library/Application Support/Claude/claude_desktop_config.json`
+1. Check that the server was successfully activated:
+   ```
+   What servers are currently active?
+   ```
 
-2. Restart the editor
+2. Check the server activation output for the list of registered tools
+
+3. Verify the container is running:
+   ```bash
+   podman ps
+   ```
+
+4. Try removing and re-adding the server
 
 3. Check for backup files (`.backup` suffix) if config was corrupted
 

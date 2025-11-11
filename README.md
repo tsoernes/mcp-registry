@@ -10,7 +10,7 @@ A dynamic MCP (Model Context Protocol) registry server that aggregates MCP serve
 - **mcpservers.org**: Community-curated MCP servers with rich metadata (official, featured, categories)
 - **Future sources**: Extensible architecture for additional registries
 
-Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses **Podman** for containerized MCP servers and supports **stdio-based servers** with automatic editor configuration, making it ideal for rootless container environments and Fedora-based systems.
+Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses **Podman** for containerized MCP servers, making it ideal for rootless container environments and Fedora-based systems. The server features **dynamic tool exposure**, automatically registering discovered tools from containerized MCP servers as callable functions.
 
 ## Features
 
@@ -20,9 +20,9 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 - **Fuzzy search**: Find servers by name, description, tags, or categories using intelligent matching
 - **Popularity ranking**: Search results sorted by relevance + popularity (official, featured, categories)
 - **Dynamic activation**: Add/remove MCP servers on-demand during a session
+- **Dynamic tool exposure**: Discovered tools automatically registered as callable MCP functions
 - **Podman integration**: Run containerized MCP servers using Podman (rootless compatible)
-- **Stdio server support**: Automatically configure npm/npx/python-based servers in editor configs
-- **Editor integration**: Automatic configuration for Zed and Claude Desktop
+- **Type-safe tool calls**: Full type checking and IDE support for dynamically registered tools
 - **Session persistence**: Active servers persist across restarts
 - **Auto-refresh**: Background updates from sources (max once per 24h)
 - **Rich metadata**: Categories, tags, official/featured flags, API key requirements
@@ -33,7 +33,7 @@ The server exposes the following tools to AI agents:
 
 - `registry-find`: Search for MCP servers by name, description, tags, or categories (sorted by popularity)
 - `registry-list`: List all available servers in the aggregated registry
-- `registry-add`: Activate an MCP server (Podman container or editor config)
+- `registry-add`: Activate an MCP server (Podman container with dynamic tool registration)
 - `registry-remove`: Deactivate a previously added server
 - `registry-active`: List currently active/mounted servers
 - `registry-config-set`: Configure environment variables for a server
@@ -98,14 +98,13 @@ Once connected to an MCP client (like Claude Desktop):
 User: "Find MCP servers for working with databases"
 → Server uses registry-find to search
 
-User: "Add the postgres server to Claude Desktop"
+User: "Add the SQLite server"
 → Server uses registry-add to activate it (Podman container)
-
-User: "Add the filesystem server to Zed"
-→ Server uses registry-add with editor integration (stdio server)
+→ Tools are automatically discovered and registered (e.g., mcp_sqlite_read_query)
 
 User: "Run a query: SELECT * FROM users LIMIT 5"
-→ Server uses registry-exec to dispatch to postgres tools
+→ Server calls mcp_sqlite_read_query(query="SELECT * FROM users LIMIT 5")
+→ Type-safe, direct tool invocation with full parameter validation
 ```
 
 ## Architecture
