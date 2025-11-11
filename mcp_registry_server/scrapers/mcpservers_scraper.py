@@ -36,39 +36,13 @@ def _normalize_server_info(server: ServerInfo) -> RegistryEntry:
     container_image = None
     server_command = None
 
-    # Check for npm package (npx-based servers)
-    if server.npm_package:
-        launch_method = LaunchMethod.STDIO_PROXY
-        server_command = ServerCommand(
-            command="npx",
-            args=["-y", server.npm_package],
-            env={},
-        )
-    # Check for Python package (python-based servers)
-    elif server.pypi_package:
-        launch_method = LaunchMethod.STDIO_PROXY
-        server_command = ServerCommand(
-            command="python",
-            args=["-m", server.pypi_package],
-            env={},
-        )
-    # Check for GitHub repo (might have container or be source-based)
-    elif server.github_url:
-        # Try to infer Docker Hub image from GitHub URL
-        # Pattern: github.com/org/repo -> docker.io/mcp/repo
-        try:
-            parts = server.github_url.replace("https://github.com/", "").split("/")
-            if len(parts) >= 2:
-                org, repo = parts[0], parts[1]
-                # Check if it might be in mcp/ namespace (official)
-                if server.official:
-                    container_image = f"docker.io/mcp/{repo}"
-                    launch_method = LaunchMethod.PODMAN
-                else:
-                    # Assume stdio-proxy for non-official GitHub repos
-                    launch_method = LaunchMethod.STDIO_PROXY
-        except Exception:
-            pass
+    # All MCPServers.org entries are source-based stdio servers
+    # They require manual installation from GitHub repo
+    launch_method = LaunchMethod.STDIO_PROXY
+
+    # Note: Install instructions would need to be parsed from HTML
+    # For now, we mark these as STDIO_PROXY without specific command
+    # Users will need to follow installation instructions from the website
 
     return RegistryEntry(
         id=f"mcpservers/{entry_id}",
@@ -87,12 +61,19 @@ def _normalize_server_info(server: ServerInfo) -> RegistryEntry:
         server_command=server_command,
         raw_metadata={
             "url": server.url,
-            "npm_package": server.npm_package,
-            "pypi_package": server.pypi_package,
-            "author": server.author,
-            "api_key_evidence": server.api_key_evidence,
-            "api_env_vars": server.api_env_vars,
-            "install_instructions": server.install_instructions,
+            "api_key_evidence": server.api_key_evidence
+            if hasattr(server, "api_key_evidence")
+            else [],
+            "api_env_vars": server.api_env_vars
+            if hasattr(server, "api_env_vars")
+            else [],
+            "install_instructions": server.install_instructions
+            if hasattr(server, "install_instructions")
+            else [],
+            "clients": server.clients if hasattr(server, "clients") else [],
+            "related_servers": server.related_servers
+            if hasattr(server, "related_servers")
+            else [],
         },
     )
 
