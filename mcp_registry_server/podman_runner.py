@@ -169,6 +169,126 @@ class PodmanRunner:
             logger.error(f"Exception starting container {name}: {e}")
             return None
 
+    async def run_interactive_container(
+        self,
+        image: str,
+        name: str,
+        environment: dict[str, str] | None = None,
+        command: list[str] | None = None,
+    ) -> tuple[str | None, asyncio.subprocess.Process | None]:
+        """Run a container in interactive mode with stdio communication.
+
+        Args:
+            image: Container image to run
+            name: Container name (used for identification)
+            environment: Environment variables to set
+            command: Command to run in container
+
+        Returns:
+            Tuple of (container_id, process) if successful, (None, None) otherwise
+        """
+        # Build podman run command
+        cmd = [
+            "podman",
+            "run",
+            "-i",  # Interactive mode - keep stdin open
+            "--name",
+            name,
+            "--rm",  # Auto-remove on exit
+        ]
+
+        # Add environment variables
+        if environment:
+            for key, value in environment.items():
+                cmd.extend(["-e", f"{key}={value}"])
+
+        # Add image
+        cmd.append(image)
+
+        # Add command if specified
+        if command:
+            cmd.extend(command)
+
+        logger.info(
+            f"Starting interactive container: {' '.join(shlex.quote(c) for c in cmd)}"
+        )
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            # Give container a moment to start
+            await asyncio.sleep(0.5)
+
+            # Generate a pseudo container ID (we can't get real ID easily in interactive mode)
+            container_id = f"interactive-{name}"
+
+            logger.info(f"Interactive container started: {name}")
+
+            # Store container info with process reference
+            self._running_containers[container_id] = ContainerInfo(
+                container_id=container_id,
+                name=name,
+                image=image,
+                status="running",
+                created_at=datetime.utcnow(),
+                environment=environment or {},
+            )
+
+            return container_id, proc
+
+        except Exception as e:
+            logger.error(f"Exception starting interactive container {name}: {e}")
+            return None, None
+
+    async def exec_in_container(
+        self,
+        container_id: str,
+        command: list[str],
+        stdin_data: str | None = None,
+    ) -> tuple[str, str, int]:
+        """Execute a command in a running container.
+
+        Args:
+            container_id: Container ID or name
+            command: Command to execute
+            stdin_data: Optional data to send to stdin
+
+        Returns:
+            Tuple of (stdout, stderr, returncode)
+        """
+        logger.info(f"Executing in container {container_id[:12]}: {' '.join(command)}")
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "podman",
+                "exec",
+                "-i",
+                container_id,
+                *command,
+                stdin=asyncio.subprocess.PIPE if stdin_data else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await proc.communicate(
+                input=stdin_data.encode() if stdin_data else None
+            )
+
+            return (
+                stdout.decode() if stdout else "",
+                stderr.decode() if stderr else "",
+                proc.returncode or 0,
+            )
+
+        except Exception as e:
+            logger.error(f"Exception executing in container {container_id}: {e}")
+            return "", str(e), -1
+
     async def stop_container(self, container_id: str, timeout: int = 10) -> bool:
         """Stop a running container gracefully.
 

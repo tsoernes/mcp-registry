@@ -9,6 +9,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from .editor_config import EditorConfigManager
+from .mcp_client import MCPClient, MCPClientManager
 from .models import (
     ActiveMount,
     ConfigSetRequest,
@@ -51,11 +52,17 @@ registry: Registry | None = None
 podman_runner: PodmanRunner | None = None
 refresh_scheduler: RefreshScheduler | None = None
 editor_manager: EditorConfigManager | None = None
+mcp_client_manager: MCPClientManager | None = None
 
 
 async def initialize_registry() -> None:
     """Initialize registry and start background tasks."""
-    global registry, podman_runner, refresh_scheduler, editor_manager
+    global \
+        registry, \
+        podman_runner, \
+        refresh_scheduler, \
+        editor_manager, \
+        mcp_client_manager
 
     if registry is not None:
         return  # Already initialized
@@ -75,6 +82,9 @@ async def initialize_registry() -> None:
     # Create editor config manager
     editor_manager = EditorConfigManager()
 
+    # Create MCP client manager
+    mcp_client_manager = MCPClientManager()
+
     # Create and start refresh scheduler
     refresh_scheduler = RefreshScheduler(registry)
     await refresh_scheduler.start()
@@ -84,13 +94,17 @@ async def initialize_registry() -> None:
 
 async def shutdown_registry() -> None:
     """Shutdown registry and cleanup resources."""
-    global podman_runner, refresh_scheduler
+    global podman_runner, refresh_scheduler, mcp_client_manager
 
     logger.info("Shutting down mcp-registry server")
 
     # Stop refresh scheduler
     if refresh_scheduler:
         await refresh_scheduler.stop()
+
+    # Close all MCP clients
+    if mcp_client_manager:
+        await mcp_client_manager.close_all()
 
     # Cleanup Podman containers
     if podman_runner:
@@ -500,33 +514,71 @@ async def registry_exec(
     tool_name: str = Field(
         ..., description="Fully-qualified tool name (prefix_toolname)"
     ),
-    arguments: dict[str, str] = Field(
+    arguments: dict[str, Any] = Field(
         default_factory=dict, description="Tool arguments as key-value pairs"
     ),
 ) -> str:
     """Execute a tool from an active MCP server.
 
-    Tool names must be prefixed with the server's prefix (e.g., postgres_run_query).
+    Tool names must be prefixed with the server's prefix (e.g., filesystem_read_file).
+
+    Note: This is a simplified implementation that provides basic tool execution.
+    Full MCP protocol support (capabilities negotiation, resources, prompts) would
+    require significant additional implementation.
 
     Returns:
         Tool execution result
     """
     await initialize_registry()
 
-    # TODO: Implement actual tool dispatch to mounted servers
-    # This would require:
-    # 1. Parse prefix from tool_name
-    # 2. Find active mount by prefix
-    # 3. Communicate with container via stdio or HTTP
-    # 4. Forward tool call and return result
+    # Parse prefix from tool name
+    if "_" not in tool_name:
+        return f"Invalid tool name format. Expected: prefix_toolname, got: {tool_name}"
 
-    return f"""Tool execution not yet implemented.
+    prefix = tool_name.split("_")[0]
+    actual_tool_name = "_".join(tool_name.split("_")[1:])
 
-Requested tool: {tool_name}
-Arguments: {arguments}
+    # Find active mount by prefix
+    active_mounts = await registry.list_active_mounts()
+    mount = None
+    for m in active_mounts:
+        if m.prefix == prefix:
+            mount = m
+            break
 
-This feature requires implementing MCP client communication with running containers.
-Coming soon!
+    if not mount:
+        return f"No active server found with prefix: {prefix}"
+
+    # Check if we have an MCP client for this container
+    client = mcp_client_manager.get_client(mount.container_id)
+
+    if not client:
+        return f"""MCP client not available for {mount.name}.
+
+Container: {mount.container_id[:12] if mount.container_id else "N/A"}
+
+Note: Current implementation requires containers to be started in interactive mode
+with MCP protocol support. This is a limitation of the current architecture.
+
+For now, please use the server's native tools directly or access via editor integration.
+"""
+
+    # Execute tool via MCP client
+    try:
+        result = await client.call_tool(actual_tool_name, arguments)
+        return f"""Tool executed successfully: {tool_name}
+
+Result:
+{result}
+"""
+    except Exception as e:
+        logger.error(f"Tool execution failed for {tool_name}: {e}", exc_info=True)
+        return f"""Tool execution failed: {tool_name}
+
+Error: {str(e)}
+
+This may indicate the tool doesn't exist or the server encountered an error.
+Use the server's documentation to verify tool names and arguments.
 """
 
 
