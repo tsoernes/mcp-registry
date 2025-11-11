@@ -61,6 +61,7 @@ async def test_mcp_container():
             image=test_image,
             name=container_name,
             environment={},
+            command=["--db-path", "/tmp/test.db"],  # SQLite needs a database path
         )
 
         if not container_id or not process:
