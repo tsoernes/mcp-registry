@@ -31,17 +31,17 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 
 The server exposes the following tools to AI agents:
 
-- `registry_find`: Search for MCP servers by name, description, tags, or categories (sorted by popularity)
-- `registry_list`: List all available servers in the aggregated registry
-- `registry_get_docs`: Get documentation and setup instructions for an MCP server
-- `registry_launch_stdio`: Launch a stdio-based MCP server with custom command, args, and environment
-- `registry_add`: Activate an MCP server (Podman container with dynamic tool registration)
-- `registry_remove`: Deactivate a previously added server
-- `registry_active`: List currently active/mounted servers with tool/resource/prompt counts
-- `registry_config_set`: Configure environment variables for a server
-- `registry_exec`: Execute a tool from any active server
-- `registry_refresh`: Force refresh a specific source (respects rate limits)
-- `registry_status`: View registry statistics and health information
+- `mcp_registry_find`: Search for MCP servers by name, description, tags, or categories (sorted by popularity)
+- `mcp_registry_list`: List all available servers in the aggregated registry
+- `mcp_registry_get_docs`: Get documentation and setup instructions for an MCP server
+- `mcp_registry_launch_stdio`: Launch a stdio-based MCP server with custom command, args, and environment
+- `mcp_registry_add`: Activate an MCP server (Podman container with dynamic tool registration)
+- `mcp_registry_remove`: Deactivate a previously added server
+- `mcp_registry_active`: List currently active/mounted servers with tool/resource/prompt counts
+- `mcp_registry_config_set`: Configure environment variables for a server
+- `mcp_registry_exec`: Execute a tool from any active server
+- `mcp_registry_refresh`: Force refresh a specific source (respects rate limits)
+- `mcp_registry_status`: View registry statistics and health information
 
 ## Installation
 
@@ -108,28 +108,28 @@ Once connected to an MCP client (like Claude Desktop or Zed):
 
 ```
 User: "Find MCP servers for working with databases"
-→ Agent uses registry_find to search
+→ Agent uses mcp_registry_find to search
 → Returns results sorted by relevance and popularity
 
 User: "Get documentation for the SQLite server"
-→ Agent uses registry_get_docs to show setup instructions
+→ Agent uses mcp_registry_get_docs to show setup instructions
 
 User: "Add the SQLite server"
-→ Agent uses registry_add to activate it (Podman container or stdio process)
+→ Agent uses mcp_registry_add to activate it (Podman container or stdio process)
 → Tools, resources, and prompts are automatically discovered
 → Discovered tools are registered with dynamic Python functions
 
 User: "List active servers"
-→ Agent uses registry_active
+→ Agent uses mcp_registry_active
 → Shows server details including tool/resource/prompt counts
 
 User: "Execute a query on the SQLite server"
-→ Agent uses registry_exec with tool_name="sqlite_read_query" 
+→ Agent uses mcp_registry_exec with tool_name="sqlite_read_query" 
 → Type-safe tool invocation with JSON Schema validation
 → Results returned from the active MCP server
 
 User: "Remove the SQLite server"
-→ Agent uses registry_remove to deactivate and clean up
+→ Agent uses mcp_registry_remove to deactivate and clean up
 ```
 
 ## Architecture
@@ -280,12 +280,12 @@ python -m mcp_registry_server.server
 - [x] Session persistence
 - [x] Background refresh scheduler
 - [x] Comprehensive test suite with pytest
-- [x] Registry tools (find, list, get_docs, launch_stdio, add, remove, active, status, config-set, exec, refresh)
+- [x] Registry tools (mcp_registry_find, mcp_registry_list, mcp_registry_get_docs, mcp_registry_launch_stdio, mcp_registry_add, mcp_registry_remove, mcp_registry_active, mcp_registry_status, mcp_registry_config_set, mcp_registry_exec, mcp_registry_refresh)
 - [x] Stdio server support with custom launch commands
 - [x] Zed and Claude Desktop integration
 - [x] Dynamic tool discovery and registration
 - [x] Resource and prompt discovery
-- [x] Tool dispatch (registry_exec implementation)
+- [x] Tool dispatch (mcp_registry_exec implementation)
 - [ ] Automatic image building from source
 - [ ] Authentication/secrets management integration
 - [ ] Code-mode tool composition
@@ -318,7 +318,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 - ✅ Podman container management with MCP stdio protocol
 - ✅ Stdio server support with custom launch commands (registry_launch_stdio)
 - ✅ Dynamic tool/resource/prompt discovery and registration
-- ✅ Tool execution via registry_exec
+- ✅ Tool execution via mcp_registry_exec
 - ✅ Zed and Claude Desktop integration
 - ✅ Background refresh scheduler
 - ✅ Comprehensive test suite (70%+ coverage)

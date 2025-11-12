@@ -121,7 +121,7 @@ async def shutdown_registry() -> None:
     logger.info("mcp-registry server shutdown complete")
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_find")
 async def registry_find(
     query: str = Field(..., description="Search text (fuzzy matched)"),
     categories: list[str] = Field(
@@ -205,7 +205,7 @@ async def registry_find(
     return "\n".join(output)
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_list")
 async def registry_list(
     source: str | None = Field(None, description="Filter by source: docker, mcpservers, or all"),
     limit: int = Field(50, description="Max results to return (1-200)"),
@@ -244,7 +244,7 @@ async def registry_list(
     return "\n".join(output)
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_get_docs")
 async def registry_get_docs(
     entry_id: str = Field(..., description="Registry entry ID to get documentation for"),
 ) -> str:
@@ -263,7 +263,7 @@ async def registry_get_docs(
     return entry.get_documentation()
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_launch_stdio")
 async def registry_launch_stdio(
     command: str = Field(..., description="Command to execute (e.g., 'npx', 'python', 'node')"),
     prefix: str = Field(..., description="Tool prefix for namespacing (e.g., 'filesystem')"),
@@ -464,7 +464,7 @@ Use `registry-remove` with entry_id="{server_id}" to stop this server.
         return f"Failed to launch stdio server: {str(e)}"
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_add")
 async def registry_add(
     entry_id: str = Field(..., description="Registry entry ID to activate"),
     prefix: str | None = Field(
@@ -678,7 +678,7 @@ You can manually configure them in your MCP client if needed.
 """
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_remove")
 async def registry_remove(
     entry_id: str = Field(..., description="Registry entry ID to deactivate"),
 ) -> str:
@@ -730,7 +730,7 @@ async def registry_remove(
     return f"Successfully deactivated: {mount.name}"
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_active")
 async def registry_active() -> str:
     """List all currently active MCP servers.
 
@@ -773,7 +773,7 @@ async def registry_active() -> str:
     return "\n".join(output)
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_config_set")
 async def registry_config_set(
     entry_id: str = Field(..., description="Active server ID to configure"),
     environment: dict[str, str] = Field(
@@ -819,7 +819,7 @@ To apply now, use `registry-remove` followed by `registry-add`.
 """
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_exec")
 async def registry_exec(
     tool_name: str = Field(..., description="Fully-qualified tool name (prefix_toolname)"),
     arguments: dict[str, Any] = Field(
@@ -892,7 +892,7 @@ Use the server's documentation to verify tool names and arguments.
 """
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_refresh")
 async def registry_refresh(
     source: str = Field(..., description="Source to refresh: docker, mcpservers, or all"),
 ) -> str:
@@ -922,7 +922,7 @@ async def registry_refresh(
     return f"# Refresh results\n\n" + "\n".join(results)
 
 
-@mcp.tool()
+@mcp.tool(name="mcp_registry_status")
 async def registry_status() -> str:
     """Get registry status and statistics.
 
