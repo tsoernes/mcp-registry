@@ -4,11 +4,13 @@ import asyncio
 import logging
 from pathlib import Path
 
+import httpx
 import yaml
 from git import Repo
 from git.exc import GitCommandError
 
 from ..models import LaunchMethod, RegistryEntry, SourceType
+from .github_utils import fetch_github_stars
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +52,7 @@ async def clone_or_update_docker_registry(sources_dir: Path) -> Path | None:
         return None
 
 
-def _parse_docker_registry_entry(
-    entry_data: dict, entry_id: str
-) -> RegistryEntry | None:
+def _parse_docker_registry_entry(entry_data: dict, entry_id: str) -> RegistryEntry | None:
     """Parse a single Docker registry YAML entry to RegistryEntry format.
 
     Args:
@@ -110,9 +110,7 @@ def _parse_docker_registry_entry(
             tags = [tags]
 
         # Docker-built images are official
-        official = bool(
-            container_image and container_image.startswith("docker.io/mcp/")
-        )
+        official = bool(container_image and container_image.startswith("docker.io/mcp/"))
 
         # Featured flag (not in YAML schema currently)
         featured = entry_data.get("featured", False)
@@ -147,17 +145,19 @@ def _parse_docker_registry_entry(
             raw_metadata=entry_data,
         )
     except Exception as e:
-        logger.warning(
-            f"Failed to parse Docker registry entry {entry_id}: {e}", exc_info=True
-        )
+        logger.warning(f"Failed to parse Docker registry entry {entry_id}: {e}", exc_info=True)
         return None
 
 
-async def scrape_docker_registry(sources_dir: Path) -> list[RegistryEntry]:
+async def scrape_docker_registry(
+    sources_dir: Path,
+    fetch_github_stars_flag: bool = True,
+) -> list[RegistryEntry]:
     """Scrape the Docker MCP registry for entries.
 
     Args:
         sources_dir: Directory containing cloned sources
+        fetch_github_stars_flag: Whether to fetch GitHub stars for popularity ranking
 
     Returns:
         List of normalized RegistryEntry objects
@@ -211,6 +211,16 @@ async def scrape_docker_registry(sources_dir: Path) -> list[RegistryEntry]:
             logger.warning(f"Failed to parse YAML {server_dir.name}/server.yaml: {e}")
         except Exception as e:
             logger.warning(f"Failed to process {server_dir.name}: {e}", exc_info=True)
+
+    # Fetch GitHub stars for all entries with repo URLs
+    if fetch_github_stars_flag and entries:
+        logger.info(f"Fetching GitHub stars for {len(entries)} Docker registry entries")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            for entry in entries:
+                if entry.repo_url:
+                    stars = await fetch_github_stars(entry.repo_url, client)
+                    if stars is not None:
+                        entry.raw_metadata["github_stars"] = stars
 
     logger.info(
         f"Scraped {len(entries)} entries from Docker MCP registry "

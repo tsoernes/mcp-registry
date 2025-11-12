@@ -5,6 +5,8 @@ import logging
 import sys
 from pathlib import Path
 
+import httpx
+
 # Add scripts directory to path to import existing scraper
 scripts_dir = Path(__file__).parent.parent.parent / "scripts"
 sys.path.insert(0, str(scripts_dir))
@@ -12,6 +14,7 @@ sys.path.insert(0, str(scripts_dir))
 from scrape_mcpservers import ServerInfo, scrape_all_servers
 
 from ..models import LaunchMethod, RegistryEntry, ServerCommand, SourceType
+from .github_utils import fetch_github_stars
 
 logger = logging.getLogger(__name__)
 
@@ -64,16 +67,12 @@ def _normalize_server_info(server: ServerInfo) -> RegistryEntry:
             "api_key_evidence": server.api_key_evidence
             if hasattr(server, "api_key_evidence")
             else [],
-            "api_env_vars": server.api_env_vars
-            if hasattr(server, "api_env_vars")
-            else [],
+            "api_env_vars": server.api_env_vars if hasattr(server, "api_env_vars") else [],
             "install_instructions": server.install_instructions
             if hasattr(server, "install_instructions")
             else [],
             "clients": server.clients if hasattr(server, "clients") else [],
-            "related_servers": server.related_servers
-            if hasattr(server, "related_servers")
-            else [],
+            "related_servers": server.related_servers if hasattr(server, "related_servers") else [],
         },
     )
 
@@ -83,6 +82,7 @@ async def scrape_mcpservers_org(
     limit: int | None = None,
     use_cache: bool = True,
     cache_dir: str | None = None,
+    fetch_github_stars_flag: bool = True,
 ) -> list[RegistryEntry]:
     """Scrape mcpservers.org and return normalized registry entries.
 
@@ -91,6 +91,7 @@ async def scrape_mcpservers_org(
         limit: Optional limit on number of servers to scrape
         use_cache: Whether to use cached HTML pages
         cache_dir: Cache directory for HTML pages
+        fetch_github_stars_flag: Whether to fetch GitHub stars for popularity ranking
 
     Returns:
         List of normalized RegistryEntry objects
@@ -126,9 +127,7 @@ async def scrape_mcpservers_org(
             entry = _normalize_server_info(server)
             entries.append(entry)
         except Exception as e:
-            logger.warning(
-                f"Failed to normalize server {server.name}: {e}", exc_info=True
-            )
+            logger.warning(f"Failed to normalize server {server.name}: {e}", exc_info=True)
             continue
 
     logger.info(
@@ -136,5 +135,15 @@ async def scrape_mcpservers_org(
         f"(official={sum(1 for e in entries if e.official)}, "
         f"featured={sum(1 for e in entries if e.featured)})"
     )
+
+    # Fetch GitHub stars for all entries with repo URLs
+    if fetch_github_stars_flag and entries:
+        logger.info(f"Fetching GitHub stars for {len(entries)} mcpservers.org entries")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            for entry in entries:
+                if entry.repo_url:
+                    stars = await fetch_github_stars(entry.repo_url, client)
+                    if stars is not None:
+                        entry.raw_metadata["github_stars"] = stars
 
     return entries
