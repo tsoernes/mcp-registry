@@ -336,6 +336,18 @@ async def registry_launch_stdio(
         tool_names = [tool.get("name", "unknown") for tool in tools]
         logger.info(f"Discovered {len(tool_names)} tools: {tool_names}")
 
+        # Discover resources
+        logger.info(f"Discovering resources from stdio server...")
+        resources = await asyncio.wait_for(client.list_resources(), timeout=30.0)
+        resource_uris = [res.get("uri", "unknown") for res in resources]
+        logger.info(f"Discovered {len(resource_uris)} resources: {resource_uris}")
+
+        # Discover prompts
+        logger.info(f"Discovering prompts from stdio server...")
+        prompts = await asyncio.wait_for(client.list_prompts(), timeout=30.0)
+        prompt_names = [prompt.get("name", "unknown") for prompt in prompts]
+        logger.info(f"Discovered {len(prompt_names)} prompts: {prompt_names}")
+
         # Register client with manager
         mcp_client_manager.register_client(server_id, client, process)
 
