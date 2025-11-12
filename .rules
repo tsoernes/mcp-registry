@@ -1,0 +1,170 @@
+# MCP Registry - Repository Rules and Guidelines
+
+## Executive Overview
+
+### Purpose
+A Model Context Protocol (MCP) registry server that aggregates MCP server metadata from multiple sources and exposes a FastMCP interface to discover, document, launch, and interact with MCP servers. It manages lifecycle for servers started via containers (Podman) or local stdio processes and dynamically exposes discovered tools to clients.
+
+### Architecture
+- **Data layer**: Strongly typed Pydantic models for registry entries, active mounts, queries, and source status, with on-disk caching for fast startup and offline operation.
+- **Registry service**: Central in-memory index with fuzzy search and filtering, persistence, source status tracking, and concurrency via asyncio locks; includes CRUD for active mounts and environment management.
+- **Ingestion**: Scrapers for mcpservers.org and a Docker registry git source normalize heterogeneous data into RegistryEntry objects; background tasks periodically refresh sources with rate limits and status updates.
+- **Execution layer**: Runners orchestrate lifecycle—podman_runner for container images and stdio_runner for local commands—while an MCP JSON-RPC client handles initialization, discovery, and tool invocation.
+- **Dynamic tool exposure**: A schema converter turns MCP tool JSON Schemas into typed async Python functions, enabling safe, prefixed, on-the-fly registration within FastMCP and robust cleanup of dynamic tools and clients.
+- **API/Server**: A FastMCP server exposes registry tools (find, list, docs, launch, add/remove, status) and wires dynamic tool exposure to running servers; editor configuration utilities integrate with Zed and Claude.
+
+### Key Patterns and Choices
+- Async-first design with guarded critical sections and graceful shutdowns
+- Normalization pipelines for heterogeneous sources
+- Schema-driven function generation to fit FastMCP constraints
+- Clear separation of concerns (scrapers, registry, runners, client, server)
+- Idempotent cleanup and resource tracking
+- Detection of API key needs and environment isolation
+
+## Directory Structure
+
+### Root (.)
+Top-level project entry containing user-facing documentation (overview, quickstart, project summary), packaging and test configuration, and small demos for stdio-preserving restarts.
+
+**Key Files:**
+- `README.md`: Comprehensive overview of the MCP registry server
+- `pyproject.toml`: Project metadata and packaging configuration
+- `pytest.ini`: Pytest configuration with coverage requirements
+- `QUICKSTART.md`: Concise getting-started guide
+
+### docs/
+Architecture and implementation documentation detailing stdio/container communication, dynamic tool exposure, system flows, verification outcomes, and remaining work.
+
+**Key Files:**
+- `ARCHITECTURE_DIAGRAM.md`: Component and flow diagrams
+- `DYNAMIC_TOOL_EXPOSURE.md`: Schema conversion pipeline documentation
+- `MCP_CONTAINER_STDIO_IMPLEMENTATION.md`: Detailed report of Podman stdio communication
+- `IMPLEMENTATION_SUMMARY.md`: Executive summary of dynamic tool exposure
+
+### mcp_registry_server/
+Core package implementing the registry service, FastMCP server, schema-driven dynamic tool exposure, JSON-RPC MCP client, and process/container runners.
+
+**Critical Files:**
+- `server.py`: FastMCP server with all registry tools (mcp_registry_*)
+- `registry.py`: Central registry with caching, persistence, fuzzy search
+- `models.py`: Core Pydantic models forming the typed data layer
+- `mcp_client.py`: JSON-RPC MCP client for tool discovery and execution
+- `schema_converter.py`: Converts JSON Schemas to typed Python functions
+- `podman_runner.py`: Manages Podman container lifecycle
+- `stdio_runner.py`: Spawns and manages stdio-based MCP processes
+- `tasks.py`: Background scheduler for source refreshes
+
+### mcp_registry_server/scrapers/
+Adapters for external sources that fetch, parse, and normalize MCP server metadata.
+
+**Files:**
+- `docker_registry.py`: Clones/updates Docker MCP registry git repo
+- `mcpservers_scraper.py`: Async wrapper for mcpservers.org scraper
+
+### mcp_registry_server/cache/
+Serialized registry data store for quick lookups and offline operation.
+
+### tests/
+Unit and integration tests covering all core behaviors and edge cases.
+
+**Key Test Files:**
+- `test_schema_converter.py`: JSON Schema to Python conversion
+- `test_registry.py`: Core registry behaviors
+- `test_dynamic_tool_integration.py`: End-to-end tool exposure
+- `test_models.py`: Pydantic model validation
+- `test_scrapers.py`: Source normalization logic
+
+### scripts/
+Operational and integration scripts for manual verification and experiments.
+
+## Development Guidelines
+
+### Tool Naming Convention
+- All exposed MCP tools MUST be prefixed with `mcp_registry_`
+- Example: `mcp_registry_find`, `mcp_registry_add`, `mcp_registry_exec`
+- This prevents naming conflicts when multiple MCP servers are active
+
+### Async Patterns
+- Use async/await throughout
+- Guard critical sections with asyncio locks
+- Implement graceful shutdowns with cleanup handlers
+- Use try/finally for resource cleanup
+
+### Type Safety
+- All models use Pydantic for validation
+- Type hints required for all functions
+- Use Field() for parameter documentation
+- Validate external data at boundaries
+
+### Error Handling
+- Log errors with context (logger.error with exc_info=True)
+- Return user-friendly error messages
+- Clean up resources in error paths
+- Track and report source status failures
+
+### Testing Requirements
+- Minimum 70% coverage (enforced by pytest)
+- Unit tests for all core logic
+- Integration tests for workflows
+- Mock external dependencies (containers, HTTP)
+
+### Security Considerations
+- Environment variable injection restricted to allowlist
+- Podman runs containers without privileged access
+- Source repositories verified during clone/pull
+- Rate limiting on source refreshes (24h minimum)
+- Stdio servers run in isolated processes
+
+### MCP Server Restart Policy
+- **DO NOT** implement self-restart tools for stdio-based MCP servers
+- When managed by clients like Zed, `os.execv()` breaks stdio connections
+- Server restarts MUST be done through the client's UI/process management
+- Self-restart attempts can spawn multiple server instances
+
+### Code Style
+- Follow PEP 8
+- Use ruff for formatting and linting
+- Descriptive variable and function names
+- Document complex logic with comments
+- Keep functions focused and small
+
+## Exposed Tools
+
+The server provides these tools to MCP clients:
+
+1. `mcp_registry_find` - Search for MCP servers by name, description, tags, or categories
+2. `mcp_registry_list` - List all available servers in the registry
+3. `mcp_registry_get_docs` - Get documentation and setup instructions
+4. `mcp_registry_launch_stdio` - Launch stdio-based MCP server with custom command
+5. `mcp_registry_add` - Activate an MCP server (Podman or stdio)
+6. `mcp_registry_remove` - Deactivate a server
+7. `mcp_registry_active` - List currently active servers with counts
+8. `mcp_registry_config_set` - Configure environment variables
+9. `mcp_registry_exec` - Execute a tool from any active server
+10. `mcp_registry_refresh` - Force refresh a source (respects rate limits)
+11. `mcp_registry_status` - View registry statistics and health
+
+## Common Workflows
+
+### Adding a Server
+1. Search with `mcp_registry_find`
+2. Review docs with `mcp_registry_get_docs`
+3. Activate with `mcp_registry_add` (auto-discovers tools/resources/prompts)
+4. Verify with `mcp_registry_active`
+
+### Executing Tools
+1. Use `mcp_registry_exec` with tool_name and arguments
+2. Tool names are prefixed (e.g., "sqlite_read_query")
+3. Arguments validated via JSON Schema
+
+### Lifecycle Management
+1. Active servers persist across restarts
+2. Cleanup via `mcp_registry_remove`
+3. Background refresh updates sources every 24h
+
+## Statistics
+- Total files: 42 (Python modules, tests, docs)
+- Test coverage: 70%+ required
+- Architecture: Async-first with FastMCP
+- Transport: stdio (compatible with Claude Desktop, Zed)
+- Container runtime: Podman (rootless compatible)
