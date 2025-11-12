@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import Field
 
 from .mcp_client import MCPClient, MCPClientManager
@@ -272,6 +272,7 @@ async def registry_launch_stdio(
         None,
         description="Environment variables (e.g., {'API_KEY': 'your-key'})",
     ),
+    ctx: Context = None,
 ) -> str:
     """Launch a stdio-based MCP server with custom command, args, and environment.
 
@@ -404,6 +405,11 @@ async def registry_launch_stdio(
             f"Successfully registered {len(registered_tool_names)} dynamic tools from stdio server"
         )
 
+        # Send notification to client that tools have changed
+        if ctx:
+            await ctx.send_tool_list_changed()
+            logger.info("Sent tools/list_changed notification to client")
+
         # Create active mount record
         mount = ActiveMount(
             entry_id=server_id,
@@ -470,6 +476,7 @@ async def registry_add(
     prefix: str | None = Field(
         None, description="Tool prefix for namespacing (default: auto-generated)"
     ),
+    ctx: Context = None,
 ) -> str:
     """Activate an MCP server from the registry.
 
@@ -603,6 +610,11 @@ async def registry_add(
                 f"for {entry.name}"
             )
 
+            # Send notification to client that tools have changed
+            if ctx:
+                await ctx.send_tool_list_changed()
+                logger.info("Sent tools/list_changed notification to client")
+
         except asyncio.TimeoutError:
             logger.error(f"Timeout initializing MCP client for {entry.name}")
             # Clean up
@@ -681,6 +693,7 @@ You can manually configure them in your MCP client if needed.
 @mcp.tool(name="mcp_registry_remove")
 async def registry_remove(
     entry_id: str = Field(..., description="Registry entry ID to deactivate"),
+    ctx: Context = None,
 ) -> str:
     """Deactivate an active MCP server.
 
@@ -704,6 +717,11 @@ async def registry_remove(
             except Exception as e:
                 logger.warning(f"Failed to remove tool {tool_name}: {e}")
         del _dynamic_tools[mount.container_id]
+
+        # Send notification to client that tools have changed
+        if ctx:
+            await ctx.send_tool_list_changed()
+            logger.info("Sent tools/list_changed notification to client")
 
     # Clean up MCP client if present
     if mount.container_id:

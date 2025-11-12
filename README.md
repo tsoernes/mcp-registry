@@ -21,6 +21,7 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 - **Popularity ranking**: Search results sorted by relevance + popularity (official, featured, categories)
 - **Dynamic activation**: Add/remove MCP servers on-demand during a session
 - **Dynamic tool exposure**: Discovered tools automatically registered as callable MCP functions
+- **Live notifications**: Automatic `notifications/tools/list_changed` sent to clients when tools are added/removed
 - **Podman integration**: Run containerized MCP servers using Podman (rootless compatible)
 - **Type-safe tool calls**: Full type checking and IDE support for dynamically registered tools
 - **Session persistence**: Active servers persist across restarts
@@ -196,6 +197,25 @@ Search results are sorted by a combination of:
 ### Persistence
 
 Active servers are persisted to `cache/active_mounts.json` and automatically restored on server startup.
+
+## MCP Protocol Support
+
+### Tools List Changed Notifications
+
+The server implements the MCP `notifications/tools/list_changed` protocol to keep clients updated when the available tool list changes. Notifications are automatically sent when:
+
+- **Adding a server** (`mcp_registry_add`): After successfully activating a Podman container and registering its tools
+- **Launching a stdio server** (`mcp_registry_launch_stdio`): After successfully spawning a process and registering its tools
+- **Removing a server** (`mcp_registry_remove`): After successfully removing dynamically registered tools
+
+This allows MCP clients (like Claude Desktop, Zed, or custom clients) to:
+- Update their tool cache automatically
+- Refresh UI displays of available tools
+- Avoid polling for tool list updates
+
+The notifications are sent using FastMCP's `ctx.send_tool_list_changed()` method within the tool execution context, ensuring they are only sent during active MCP request contexts as per the MCP protocol specification.
+
+**Note**: Notifications are not sent during server initialization or when tools are registered outside of an active request context.
 
 ## Development
 
