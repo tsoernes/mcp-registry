@@ -8,6 +8,7 @@ A dynamic MCP (Model Context Protocol) registry server that aggregates MCP serve
 
 - **Docker MCP Registry**: Official Docker MCP catalog (https://github.com/docker/mcp-registry)
 - **mcpservers.org**: Community-curated MCP servers with rich metadata (official, featured, categories)
+- **awesome-mcp-servers**: Comprehensive collection of 7000+ MCP servers across 34+ categories (https://github.com/TensorBlock/awesome-mcp-servers)
 - **Future sources**: Extensible architecture for additional registries
 
 Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses **Podman** for containerized MCP servers and supports **stdio-based servers** with automatic editor configuration, making it ideal for rootless container environments and Fedora-based systems.
@@ -16,7 +17,7 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 
 ### Core Capabilities
 
-- **Multi-source aggregation**: Unified search across Docker registry, mcpservers.org, and more
+- **Multi-source aggregation**: Unified search across Docker registry, mcpservers.org, awesome-mcp-servers, and more
 - **Fuzzy search**: Find servers by name, description, tags, or categories using intelligent matching
 - **Popularity ranking**: Search results sorted by relevance + popularity (official, featured, categories)
 - **Dynamic activation**: Add/remove MCP servers on-demand during a session
@@ -253,11 +254,11 @@ python -m mcp_registry_server.server
 - [x] Registry tools (find, list, add, remove, active, status, config-set, refresh)
 - [x] Stdio server support with automatic editor configuration
 - [x] Zed and Claude Desktop integration
+- [x] Additional registry sources (awesome-mcp-servers with 7000+ servers)
 - [ ] Automatic image building from source
 - [ ] Tool dispatch (registry-exec implementation)
 - [ ] Authentication/secrets management
 - [ ] Code-mode tool composition
-- [ ] Additional registry sources (Awesome MCP)
 - [ ] WebUI for registry exploration
 - [ ] Docker Compose example
 - [ ] CI/CD pipeline
@@ -283,6 +284,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 - ✅ Core registry and search functionality complete
 - ✅ mcpservers.org scraper integrated
 - ✅ Docker registry git source integration
+- ✅ awesome-mcp-servers scraper integrated (7000+ servers)
 - ✅ Podman container management
 - ✅ Stdio server support with editor configuration
 - ✅ Zed and Claude Desktop integration
@@ -295,7 +297,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - Built with [FastMCP](https://github.com/jlowin/fastmcp)
 - Inspired by [Docker Dynamic MCP](https://docs.docker.com/ai/mcp-catalog-and-toolkit/dynamic-mcp/)
-- Aggregates data from [Docker MCP Registry](https://github.com/docker/mcp-registry) and [mcpservers.org](https://mcpservers.org)
+- Aggregates data from [Docker MCP Registry](https://github.com/docker/mcp-registry), [mcpservers.org](https://mcpservers.org), and [awesome-mcp-servers](https://github.com/TensorBlock/awesome-mcp-servers)
 
 ## Support
 

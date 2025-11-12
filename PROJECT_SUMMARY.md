@@ -16,6 +16,7 @@ A dynamic MCP (Model Context Protocol) registry server that aggregates MCP serve
 #### 1. Multi-Source Aggregation ✅
 - **Docker MCP Registry**: Git-based source (https://github.com/docker/mcp-registry)
 - **mcpservers.org**: Web scraper integration with rich metadata
+- **awesome-mcp-servers**: Comprehensive collection of 7000+ MCP servers (https://github.com/TensorBlock/awesome-mcp-servers)
 - Normalized data model across all sources
 - Automatic 24-hour refresh cycle
 
