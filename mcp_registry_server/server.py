@@ -962,6 +962,56 @@ async def registry_status() -> str:
     return "\n".join(output)
 
 
+@mcp.tool()
+async def registry_server_restart() -> str:
+    """Restart the MCP registry server process.
+
+    This performs a clean restart by:
+    1. Closing all active MCP clients
+    2. Stopping all running containers/processes
+    3. Replacing the current process with a fresh one
+
+    The restart preserves the stdio connection to Zed, so you can continue
+    using the registry immediately after restart.
+
+    Returns:
+        Confirmation message (though the process will restart before returning)
+    """
+    import os
+    import sys
+
+    logger.info("Registry server restart requested")
+
+    # Clean up before restart
+    try:
+        # Close all MCP clients
+        await mcp_client_manager.close_all()
+
+        # Stop all stdio servers
+        if stdio_runner:
+            await stdio_runner.cleanup_all()
+
+        logger.info("Cleanup complete, restarting process...")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}", exc_info=True)
+
+    # Restart the process using execv
+    # This replaces the current process while preserving:
+    # - Same PID
+    # - File descriptors (stdin/stdout/stderr)
+    # - Zed's connection
+    python = sys.executable
+    args = [python] + sys.argv
+
+    logger.info(f"Exec: {' '.join(args)}")
+
+    # This replaces the process - no return
+    os.execv(python, args)
+
+    # Never reached
+    return "Restarting..."
+
+
 def main() -> None:
     """Main entry point for the server."""
     logger.info("Starting mcp-registry server")
@@ -972,53 +1022,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-@mcp.tool()
-async def registry_server_restart() -> str:
-    """Restart the MCP registry server process.
-    
-    This performs a clean restart by:
-    1. Closing all active MCP clients
-    2. Stopping all running containers/processes
-    3. Replacing the current process with a fresh one
-    
-    The restart preserves the stdio connection to Zed, so you can continue
-    using the registry immediately after restart.
-    
-    Returns:
-        Confirmation message (though the process will restart before returning)
-    """
-    import os
-    import sys
-    
-    logger.info("Registry server restart requested")
-    
-    # Clean up before restart
-    try:
-        # Close all MCP clients
-        await mcp_client_manager.close_all()
-        
-        # Stop all stdio servers
-        if stdio_runner:
-            await stdio_runner.cleanup_all()
-        
-        logger.info("Cleanup complete, restarting process...")
-    except Exception as e:
-        logger.error(f"Error during cleanup: {e}", exc_info=True)
-    
-    # Restart the process using execv
-    # This replaces the current process while preserving:
-    # - Same PID
-    # - File descriptors (stdin/stdout/stderr)
-    # - Zed's connection
-    python = sys.executable
-    args = [python] + sys.argv
-    
-    logger.info(f"Exec: {' '.join(args)}")
-    
-    # This replaces the process - no return
-    os.execv(python, args)
-    
-    # Never reached
-    return "Restarting..."
