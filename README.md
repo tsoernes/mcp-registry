@@ -31,15 +31,17 @@ Unlike the Docker Dynamic MCP which uses Docker containers, `mcp-registry` uses 
 
 The server exposes the following tools to AI agents:
 
-- `registry-find`: Search for MCP servers by name, description, tags, or categories (sorted by popularity)
-- `registry-list`: List all available servers in the aggregated registry
-- `registry-add`: Activate an MCP server (Podman container with dynamic tool registration)
-- `registry-remove`: Deactivate a previously added server
-- `registry-active`: List currently active/mounted servers
-- `registry-config-set`: Configure environment variables for a server
-- `registry-exec`: Execute a tool from any active server
-- `registry-refresh`: Force refresh a specific source (respects rate limits)
-- `registry-status`: View registry statistics and health information
+- `registry_find`: Search for MCP servers by name, description, tags, or categories (sorted by popularity)
+- `registry_list`: List all available servers in the aggregated registry
+- `registry_get_docs`: Get documentation and setup instructions for an MCP server
+- `registry_launch_stdio`: Launch a stdio-based MCP server with custom command, args, and environment
+- `registry_add`: Activate an MCP server (Podman container with dynamic tool registration)
+- `registry_remove`: Deactivate a previously added server
+- `registry_active`: List currently active/mounted servers with tool/resource/prompt counts
+- `registry_config_set`: Configure environment variables for a server
+- `registry_exec`: Execute a tool from any active server
+- `registry_refresh`: Force refresh a specific source (respects rate limits)
+- `registry_status`: View registry statistics and health information
 
 ## Installation
 
@@ -75,7 +77,9 @@ fastmcp run mcp_registry_server/server.py
 mcp-registry
 ```
 
-### Connecting to Claude Desktop
+### Connecting to MCP Clients
+
+#### Claude Desktop
 
 Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
@@ -90,21 +94,42 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
+#### Zed Editor
+
+The server can be used directly in Zed through its MCP integration. No additional configuration needed if installed in your Python environment.
+
+#### Other MCP Clients
+
+Any MCP client that supports stdio transport can connect to `mcp-registry`. The server follows the standard MCP protocol.
+
 ### Example workflow
 
-Once connected to an MCP client (like Claude Desktop):
+Once connected to an MCP client (like Claude Desktop or Zed):
 
 ```
 User: "Find MCP servers for working with databases"
-→ Server uses registry-find to search
+→ Agent uses registry_find to search
+→ Returns results sorted by relevance and popularity
+
+User: "Get documentation for the SQLite server"
+→ Agent uses registry_get_docs to show setup instructions
 
 User: "Add the SQLite server"
-→ Server uses registry-add to activate it (Podman container)
-→ Tools are automatically discovered and registered (e.g., mcp_sqlite_read_query)
+→ Agent uses registry_add to activate it (Podman container or stdio process)
+→ Tools, resources, and prompts are automatically discovered
+→ Discovered tools are registered with dynamic Python functions
 
-User: "Run a query: SELECT * FROM users LIMIT 5"
-→ Server calls mcp_sqlite_read_query(query="SELECT * FROM users LIMIT 5")
-→ Type-safe, direct tool invocation with full parameter validation
+User: "List active servers"
+→ Agent uses registry_active
+→ Shows server details including tool/resource/prompt counts
+
+User: "Execute a query on the SQLite server"
+→ Agent uses registry_exec with tool_name="sqlite_read_query" 
+→ Type-safe tool invocation with JSON Schema validation
+→ Results returned from the active MCP server
+
+User: "Remove the SQLite server"
+→ Agent uses registry_remove to deactivate and clean up
 ```
 
 ## Architecture
@@ -144,6 +169,8 @@ Each registry entry includes:
 - `featured`: Featured status (from mcpservers.org) - boosts search ranking
 - `requires_api_key`: Whether API credentials are needed
 - `tools`: Available tool names (discovered on activation)
+- `resources`: Available resource templates (discovered on activation)
+- `prompts`: Available prompt templates (discovered on activation)
 - `launch_method`: How to run (podman, stdio-proxy, remote-http)
 - `server_command`: Command configuration for stdio servers (command, args, env)
 - `last_refreshed`: Last metadata update timestamp
@@ -230,16 +257,20 @@ fastmcp dev mcp_registry_server/server.py
 
 # Or run directly
 python -m mcp_registry_server.server
+
+# Test with an MCP client
+# The server uses stdio transport and is designed to be used through
+# MCP clients like Claude Desktop or Zed editor
 ```
 
 ## Security Considerations
 
 - Container images are validated before running
-- Environment variable injection is restricted to an allowlist
-- Podman runs containers without privileged access
-- Editor config files are backed up before modification
+- Environment variable injection is restricted to an allowlist (API_KEY, API_TOKEN, AUTH_, DATABASE_, DB_, GITHUB_, OPENAI_, ANTHROPIC_, AWS_, AZURE_, GCP_, SLACK_, DISCORD_, NOTION_, MCP_)
+- Podman runs containers without privileged access (rootless mode supported)
 - Source repositories are cloned/pulled with verification
-- Rate limiting prevents excessive refresh attempts
+- Rate limiting prevents excessive refresh attempts (24h minimum between refreshes)
+- Stdio servers run in isolated processes with controlled environment
 
 ## Roadmap
 
@@ -249,12 +280,14 @@ python -m mcp_registry_server.server
 - [x] Session persistence
 - [x] Background refresh scheduler
 - [x] Comprehensive test suite with pytest
-- [x] Registry tools (find, list, add, remove, active, status, config-set, refresh)
-- [x] Stdio server support with automatic editor configuration
+- [x] Registry tools (find, list, get_docs, launch_stdio, add, remove, active, status, config-set, exec, refresh)
+- [x] Stdio server support with custom launch commands
 - [x] Zed and Claude Desktop integration
+- [x] Dynamic tool discovery and registration
+- [x] Resource and prompt discovery
+- [x] Tool dispatch (registry_exec implementation)
 - [ ] Automatic image building from source
-- [ ] Tool dispatch (registry-exec implementation)
-- [ ] Authentication/secrets management
+- [ ] Authentication/secrets management integration
 - [ ] Code-mode tool composition
 - [ ] Additional registry sources (Awesome MCP)
 - [ ] WebUI for registry exploration
@@ -282,13 +315,15 @@ MIT License - see [LICENSE](LICENSE) for details.
 - ✅ Core registry and search functionality complete
 - ✅ mcpservers.org scraper integrated
 - ✅ Docker registry git source integration
-- ✅ Podman container management
-- ✅ Stdio server support with editor configuration
+- ✅ Podman container management with MCP stdio protocol
+- ✅ Stdio server support with custom launch commands (registry_launch_stdio)
+- ✅ Dynamic tool/resource/prompt discovery and registration
+- ✅ Tool execution via registry_exec
 - ✅ Zed and Claude Desktop integration
 - ✅ Background refresh scheduler
 - ✅ Comprehensive test suite (70%+ coverage)
-- ⏳ Tool dispatch to mounted servers (in progress)
 - ⏳ Source-based server building (planned)
+- ⏳ Enhanced secrets management (planned)
 
 ## Acknowledgments
 
