@@ -176,6 +176,12 @@ class ActiveMount(BaseModel):
     tools: list[str] = Field(
         default_factory=list, description="Discovered tools from this server"
     )
+    resources: list[str] = Field(
+        default_factory=list, description="Discovered resources from this server"
+    )
+    prompts: list[str] = Field(
+        default_factory=list, description="Discovered prompts from this server"
+    )
 
     model_config = {"frozen": False}
 

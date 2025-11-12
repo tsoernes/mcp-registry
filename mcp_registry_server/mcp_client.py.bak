@@ -142,38 +142,6 @@ class MCPClient:
         result = await self._send_request("tools/list")
         return result.get("tools", [])
 
-    async def list_resources(self) -> list[dict[str, Any]]:
-        """List available resources from the MCP server.
-
-        Returns:
-            List of resource definitions
-        """
-        if not self._initialized:
-            await self.initialize()
-
-        try:
-            result = await self._send_request("resources/list")
-            return result.get("resources", [])
-        except Exception as e:
-            logger.debug(f"Failed to list resources: {e}")
-            return []
-
-    async def list_prompts(self) -> list[dict[str, Any]]:
-        """List available prompts from the MCP server.
-
-        Returns:
-            List of prompt definitions
-        """
-        if not self._initialized:
-            await self.initialize()
-
-        try:
-            result = await self._send_request("prompts/list")
-            return result.get("prompts", [])
-        except Exception as e:
-            logger.debug(f"Failed to list prompts: {e}")
-            return []
-
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool on the MCP server.
 

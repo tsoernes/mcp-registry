@@ -327,12 +327,12 @@ async def registry_launch_stdio(
 
         # Initialize the MCP connection
         logger.info(f"Initializing MCP client for stdio server...")
-        capabilities = await asyncio.wait_for(client.initialize(), timeout=10.0)
+        capabilities = await asyncio.wait_for(client.initialize(), timeout=30.0)
         logger.info(f"MCP client initialized: {capabilities}")
 
         # Discover tools
         logger.info(f"Discovering tools from stdio server...")
-        tools = await asyncio.wait_for(client.list_tools(), timeout=10.0)
+        tools = await asyncio.wait_for(client.list_tools(), timeout=30.0)
         tool_names = [tool.get("name", "unknown") for tool in tools]
         logger.info(f"Discovered {len(tool_names)} tools: {tool_names}")
 
@@ -397,10 +397,12 @@ async def registry_launch_stdio(
             entry_id=server_id,
             name=f"Stdio Server ({prefix})",
             prefix=prefix,
-            container_id=None,
+            container_id=server_id,
             pid=process.pid,
             environment=env,
             tools=tool_names,
+            resources=resource_uris,
+            prompts=prompt_names,
         )
 
         await registry.add_active_mount(mount)
@@ -412,10 +414,18 @@ async def registry_launch_stdio(
 **Prefix:** {prefix}
 **Command:** {command} {" ".join(args)}
 **Tools discovered:** {len(tool_names)}
+**Resources discovered:** {len(resource_uris)}
+**Prompts discovered:** {len(prompt_names)}
 
 Available tools (callable via MCP):
 {chr(10).join(f"  - mcp_{prefix}_{tool}" for tool in tool_names[:10])}
 {f"  ... and {len(tool_names) - 10} more" if len(tool_names) > 10 else ""}
+
+{f"Available resources: {', '.join(resource_uris[:5])}" if resource_uris else ""}
+{f"  ... and {len(resource_uris) - 5} more" if len(resource_uris) > 5 else ""}
+
+{f"Available prompts: {', '.join(prompt_names[:5])}" if prompt_names else ""}
+{f"  ... and {len(prompt_names) - 5} more" if len(prompt_names) > 5 else ""}
 
 These tools are now directly available through this MCP server!
 You can call them by name (e.g., mcp_{prefix}_{tool_names[0] if tool_names else "toolname"})
@@ -502,14 +512,26 @@ async def registry_add(
 
             # Initialize the MCP connection
             logger.info(f"Initializing MCP client for {entry.name}...")
-            capabilities = await asyncio.wait_for(client.initialize(), timeout=10.0)
+            capabilities = await asyncio.wait_for(client.initialize(), timeout=30.0)
             logger.info(f"MCP client initialized: {capabilities}")
 
             # Discover tools
             logger.info(f"Discovering tools for {entry.name}...")
-            tools = await asyncio.wait_for(client.list_tools(), timeout=10.0)
+            tools = await asyncio.wait_for(client.list_tools(), timeout=30.0)
             tool_names = [tool.get("name", "unknown") for tool in tools]
             logger.info(f"Discovered {len(tool_names)} tools: {tool_names}")
+
+            # Discover resources
+            logger.info(f"Discovering resources for {entry.name}...")
+            resources = await asyncio.wait_for(client.list_resources(), timeout=30.0)
+            resource_uris = [res.get("uri", "unknown") for res in resources]
+            logger.info(f"Discovered {len(resource_uris)} resources: {resource_uris}")
+
+            # Discover prompts
+            logger.info(f"Discovering prompts for {entry.name}...")
+            prompts = await asyncio.wait_for(client.list_prompts(), timeout=30.0)
+            prompt_names = [prompt.get("name", "unknown") for prompt in prompts]
+            logger.info(f"Discovered {len(prompt_names)} prompts: {prompt_names}")
 
             # Register client with manager
             mcp_client_manager.register_client(container_id, client, process)
@@ -598,6 +620,8 @@ async def registry_add(
             container_id=container_id,
             environment={},
             tools=tool_names,  # Store discovered tools
+            resources=resource_uris,
+            prompts=prompt_names,
         )
 
         await registry.add_active_mount(mount)
@@ -609,10 +633,18 @@ async def registry_add(
 **Prefix:** {prefix}
 **Image:** {entry.container_image}
 **Tools discovered:** {len(tool_names)}
+**Resources discovered:** {len(resource_uris)}
+**Prompts discovered:** {len(prompt_names)}
 
 Available tools (callable via MCP):
 {chr(10).join(f"  - mcp_{prefix}_{tool}" for tool in tool_names[:10])}
 {f"  ... and {len(tool_names) - 10} more" if len(tool_names) > 10 else ""}
+
+{f"Available resources: {', '.join(resource_uris[:5])}" if resource_uris else ""}
+{f"  ... and {len(resource_uris) - 5} more" if len(resource_uris) > 5 else ""}
+
+{f"Available prompts: {', '.join(prompt_names[:5])}" if prompt_names else ""}
+{f"  ... and {len(prompt_names) - 5} more" if len(prompt_names) > 5 else ""}
 
 These tools are now directly available through this MCP server!
 You can call them by name (e.g., mcp_{prefix}_{tool_names[0] if tool_names else "toolname"})
@@ -716,6 +748,12 @@ async def registry_active() -> str:
 
         if mount.tools:
             output.append(f"**Tools:** {len(mount.tools)} available")
+
+        if mount.resources:
+            output.append(f"**Resources:** {len(mount.resources)} available")
+
+        if mount.prompts:
+            output.append(f"**Prompts:** {len(mount.prompts)} available")
 
         output.append(f"**Mounted at:** {mount.mounted_at.strftime('%Y-%m-%d %H:%M:%S')}")
         output.append("")
