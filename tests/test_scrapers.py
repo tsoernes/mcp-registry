@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 import pytest
 from mcp_registry_server.models import LaunchMethod, SourceType
 from mcp_registry_server.scrapers.mcpservers_scraper import _normalize_server_info
+from mcp_registry_server.scrapers.awesome_mcp_scraper import (
+    _extract_github_url,
+    _parse_server_entry,
+)
 
 
 @dataclass
@@ -128,3 +132,84 @@ class TestMCPServersScraper:
 
         entry2 = _normalize_server_info(server_without_key)
         assert entry2.requires_api_key is False
+
+
+class TestAwesomeMCPScraper:
+    """Tests for awesome-mcp-servers scraper."""
+
+    def test_extract_github_url_markdown(self):
+        """Test extracting GitHub URL from markdown link."""
+        text = "[owner/repo](https://github.com/owner/repo)"
+        url = _extract_github_url(text)
+        assert url == "https://github.com/owner/repo"
+
+    def test_extract_github_url_plain(self):
+        """Test extracting GitHub URL from plain text."""
+        text = "Check out https://github.com/owner/repo for more"
+        url = _extract_github_url(text)
+        assert url == "https://github.com/owner/repo"
+
+    def test_extract_github_url_none(self):
+        """Test extracting GitHub URL returns None when not found."""
+        text = "No GitHub URL here"
+        url = _extract_github_url(text)
+        assert url is None
+
+    def test_parse_server_entry_basic(self):
+        """Test parsing a basic server entry."""
+        line = "- [owner/repo](https://github.com/owner/repo): A simple description"
+        entry = _parse_server_entry(line, "Test Category")
+        
+        assert entry is not None
+        assert entry.name == "owner/repo"
+        assert entry.source == SourceType.AWESOME
+        assert entry.repo_url == "https://github.com/owner/repo"
+        assert "Test Category" in entry.categories
+        assert "simple description" in entry.description.lower()
+
+    def test_parse_server_entry_with_dash_separator(self):
+        """Test parsing server entry with dash separator."""
+        line = "- [user/project](https://github.com/user/project) - Facilitates something"
+        entry = _parse_server_entry(line, "Development")
+        
+        assert entry is not None
+        assert entry.name == "user/project"
+        assert "facilitates" in entry.description.lower()
+
+    def test_parse_server_entry_docker_detection(self):
+        """Test launch method detection for Docker."""
+        line = "- [org/proj](https://github.com/org/proj): Uses Docker containers"
+        entry = _parse_server_entry(line, "Infrastructure")
+        
+        assert entry is not None
+        assert entry.launch_method == LaunchMethod.PODMAN
+
+    def test_parse_server_entry_npm_detection(self):
+        """Test launch method detection for npm/Node."""
+        line = "- [dev/tool](https://github.com/dev/tool): A Node.js based server"
+        entry = _parse_server_entry(line, "Utilities")
+        
+        assert entry is not None
+        assert entry.launch_method == LaunchMethod.STDIO_PROXY
+
+    def test_parse_server_entry_api_key_detection(self):
+        """Test API key requirement detection."""
+        line = "- [api/server](https://github.com/api/server): Requires API key authentication"
+        entry = _parse_server_entry(line, "Cloud")
+        
+        assert entry is not None
+        assert entry.requires_api_key is True
+
+    def test_parse_server_entry_invalid_line(self):
+        """Test parsing invalid line returns None."""
+        line = "Not a valid server entry"
+        entry = _parse_server_entry(line, "Category")
+        
+        assert entry is None
+
+    def test_parse_server_entry_no_github_url(self):
+        """Test parsing line without GitHub URL returns None."""
+        line = "- [something](https://example.com): Description"
+        entry = _parse_server_entry(line, "Category")
+        
+        assert entry is None
