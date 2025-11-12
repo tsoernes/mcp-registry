@@ -164,14 +164,22 @@ Research findings on alternative and complementary MCP registry sources to consi
    - Clone/update: https://github.com/microsoft/mcp
    - Parse catalog structure
 
-### Phase 2: Community Aggregators
-4. **Glama.ai** - Add if API is accessible
+### Phase 2: Enhanced Metadata
+4. **GitHub Stars** - ✅ IMPLEMENTED
+   - Fetch stars from GitHub API for repositories
+   - Use logarithmic scale for ranking (10 stars = +1, 100 = +2, etc.)
+   - Capped at +10 points for very popular projects
+   - Added to `raw_metadata["github_stars"]`
+   - Significantly improves popularity ranking
+
+### Phase 3: Community Aggregators
+5. **Glama.ai** - Add if API is accessible
    - JSON endpoint: https://glama.ai/mcp/servers.json
    - Large catalog (3,000+ servers)
    - Create scraper: `glama_registry.py`
 
-### Phase 3: Curated Lists (Lower Priority)
-5. Consider aggregating 1-2 well-maintained awesome lists
+### Phase 4: Curated Lists (Lower Priority)
+6. Consider aggregating 1-2 well-maintained awesome lists
    - Focus on punkpeye/awesome-mcp-servers (most established)
    - Parse README.md for server entries
 
@@ -202,8 +210,16 @@ All sources should map to existing `RegistryEntry` model:
 - Cache aggressively (24h+ for static data)
 
 ### Ranking/Priority
-Update search ranking to consider source:
-- Official sources (+15 points)
+Current search ranking weights:
+- Official flag (+20 points)
+- MCP Official Registry source (+15 points)
+- Featured flag (+10 points)
+- GitHub stars (logarithmic, max +10 points)
+- Docker registry source (+5 points)
+- Container image (+3 points)
+- Categories (+2 points each, max 3)
+
+Future additions:
 - Microsoft/AWS official (+12 points)
 - Community registries (+5 points)
 - Awesome lists (+2 points)
@@ -212,30 +228,32 @@ Update search ranking to consider source:
 
 ## Next Steps
 
-1. **Research MCP Official Registry API:**
-   - Read docs: https://github.com/modelcontextprotocol/registry
-   - Test API endpoints
-   - Check authentication requirements
+1. ✅ **MCP Official Registry** - COMPLETED
+   - Implemented scraper with GitHub stars fetching
+   - Integrated into background refresh scheduler
+   - Search ranking with highest priority (+15 points)
+   - GitHub stars add logarithmic popularity boost
+   - Test script validates functionality
 
 2. **Test Glama.ai JSON feed:**
    - Fetch: https://glama.ai/mcp/servers.json
    - Analyze schema
    - Check rate limits/ToS
 
-3. **Implement scrapers for top 3 sources:**
-   - MCP Official Registry scraper
+3. **Implement remaining Phase 1 sources:**
    - modelcontextprotocol/servers git scraper
    - Microsoft MCP catalog scraper
 
-4. **Update registry search/ranking:**
-   - Add source weights
-   - Test with multi-source data
-   - Update UI to show source badges
+4. **Enhanced popularity metrics:**
+   - Consider download counts from NPM/PyPI
+   - Track activation frequency in local registry
+   - Monitor update recency
 
 5. **Documentation:**
-   - Update README with new sources
-   - Document source priorities
-   - Add source selection criteria
+   - ✅ Update README with MCP Official source
+   - ✅ Document source priorities
+   - ✅ Add implementation summary
+   - Add source selection criteria for users
 
 ---
 

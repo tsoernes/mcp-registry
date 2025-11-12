@@ -6,6 +6,7 @@ Fetches server metadata from the official MCP Registry at registry.modelcontextp
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -17,10 +18,53 @@ logger = logging.getLogger(__name__)
 # Official MCP Registry API endpoint
 REGISTRY_API_URL = "https://registry.modelcontextprotocol.io/v0/servers"
 
+# GitHub API endpoint for repository info
+GITHUB_API_URL = "https://api.github.com/repos/{owner}/{repo}"
+
+
+async def _fetch_github_stars(
+    repo_url: str,
+    client: httpx.AsyncClient,
+) -> int | None:
+    """
+    Fetch GitHub stars for a repository.
+
+    Args:
+        repo_url: GitHub repository URL
+        client: HTTP client to use
+
+    Returns:
+        Number of stars, or None if unavailable
+    """
+    # Extract owner/repo from URL
+    # Format: https://github.com/owner/repo or https://github.com/owner/repo.git
+    match = re.search(r"github\.com[:/]([^/]+)/([^/\.]+)", repo_url)
+    if not match:
+        return None
+
+    owner, repo = match.groups()
+
+    try:
+        url = GITHUB_API_URL.format(owner=owner, repo=repo)
+        response = await client.get(url, timeout=5.0)
+
+        if response.status_code == 200:
+            data = response.json()
+            stars = data.get("stargazers_count", 0)
+            logger.debug(f"Fetched {stars} stars for {owner}/{repo}")
+            return stars
+        else:
+            logger.debug(f"GitHub API returned {response.status_code} for {owner}/{repo}")
+            return None
+    except Exception as e:
+        logger.debug(f"Failed to fetch GitHub stars for {owner}/{repo}: {e}")
+        return None
+
 
 async def scrape_mcp_official_registry(
     limit: int | None = None,
     timeout: float = 30.0,
+    fetch_github_stars: bool = True,
 ) -> list[RegistryEntry]:
     """
     Scrape server metadata from the official MCP Registry API.
@@ -31,6 +75,7 @@ async def scrape_mcp_official_registry(
     Args:
         limit: Maximum number of servers to fetch (None = all servers)
         timeout: Request timeout in seconds
+        fetch_github_stars: Whether to fetch GitHub stars for popularity ranking
 
     Returns:
         List of normalized RegistryEntry objects
@@ -58,6 +103,11 @@ async def scrape_mcp_official_registry(
                 try:
                     entry = _normalize_server(server_data)
                     if entry:
+                        # Fetch GitHub stars if enabled and repo URL exists
+                        if fetch_github_stars and entry.repo_url:
+                            stars = await _fetch_github_stars(entry.repo_url, client)
+                            if stars is not None:
+                                entry.raw_metadata["github_stars"] = stars
                         entries.append(entry)
                 except Exception as e:
                     server_name = server_data.get("server", {}).get("name", "unknown")

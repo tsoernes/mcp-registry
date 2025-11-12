@@ -224,6 +224,17 @@ class Registry:
         if entry.container_image:
             score += 3.0
 
+        # GitHub stars indicate popularity and community trust
+        # Use logarithmic scale to prevent extreme outliers from dominating
+        github_stars = entry.raw_metadata.get("github_stars")
+        if github_stars and github_stars > 0:
+            import math
+
+            # Log scale: 10 stars = +1, 100 stars = +2, 1000 stars = +3, etc.
+            # Capped at +10 for very popular projects
+            star_score = min(math.log10(github_stars), 10.0)
+            score += star_score
+
         return score
 
     async def search(self, query: SearchQuery) -> list[RegistryEntry]:

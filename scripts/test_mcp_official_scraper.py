@@ -46,6 +46,9 @@ async def main():
             if entry.raw_metadata:
                 print(f"Version:      {entry.raw_metadata.get('version', 'N/A')}")
                 print(f"Updated:      {entry.raw_metadata.get('updated_at', 'N/A')}")
+                stars = entry.raw_metadata.get("github_stars")
+                if stars is not None:
+                    print(f"GitHub Stars: {stars}")
 
         print("\n" + "=" * 80)
         print(f"✓ Test completed successfully!")
@@ -53,6 +56,11 @@ async def main():
         print(f"  Launch methods: {set(e.launch_method.value for e in entries)}")
         print(f"  With containers: {sum(1 for e in entries if e.container_image)}")
         print(f"  Require API keys: {sum(1 for e in entries if e.requires_api_key)}")
+        stars_count = sum(1 for e in entries if e.raw_metadata.get("github_stars"))
+        print(f"  With GitHub stars: {stars_count}")
+        if stars_count > 0:
+            total_stars = sum(e.raw_metadata.get("github_stars", 0) for e in entries)
+            print(f"  Total stars: {total_stars}")
 
     except Exception as e:
         print(f"\n✗ Error during scraping: {e}", file=sys.stderr)
