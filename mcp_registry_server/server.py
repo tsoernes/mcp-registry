@@ -21,6 +21,11 @@ from .models import (
 from .podman_runner import PodmanRunner
 from .registry import Registry
 from .schema_converter import convert_tool_to_function, validate_tool_schema
+from .stdio_runner import (
+    StdioServerRunner,
+    parse_server_command,
+    validate_command_available,
+)
 from .tasks import RefreshScheduler
 
 # Configure logging
@@ -51,6 +56,7 @@ mcp = FastMCP(
 # Global instances
 registry: Registry | None = None
 podman_runner: PodmanRunner | None = None
+stdio_runner: StdioServerRunner | None = None
 refresh_scheduler: RefreshScheduler | None = None
 mcp_client_manager: MCPClientManager | None = None
 
@@ -60,7 +66,7 @@ _dynamic_tools: dict[str, list[str]] = {}  # container_id -> [tool_names]
 
 async def initialize_registry() -> None:
     """Initialize registry and start background tasks."""
-    global registry, podman_runner, refresh_scheduler, mcp_client_manager
+    global registry, podman_runner, stdio_runner, refresh_scheduler, mcp_client_manager
 
     if registry is not None:
         return  # Already initialized
@@ -77,6 +83,9 @@ async def initialize_registry() -> None:
     # Create Podman runner
     podman_runner = PodmanRunner()
 
+    # Create stdio runner
+    stdio_runner = StdioServerRunner()
+
     # Create MCP client manager
     mcp_client_manager = MCPClientManager()
 
@@ -89,7 +98,7 @@ async def initialize_registry() -> None:
 
 async def shutdown_registry() -> None:
     """Shutdown registry and cleanup resources."""
-    global podman_runner, refresh_scheduler, mcp_client_manager
+    global podman_runner, stdio_runner, refresh_scheduler, mcp_client_manager
 
     logger.info("Shutting down mcp-registry server")
 
@@ -105,6 +114,10 @@ async def shutdown_registry() -> None:
     if podman_runner:
         await podman_runner.cleanup_all()
 
+    # Cleanup stdio servers
+    if stdio_runner:
+        await stdio_runner.cleanup_all()
+
     logger.info("mcp-registry server shutdown complete")
 
 
@@ -114,9 +127,7 @@ async def registry_find(
     categories: list[str] = Field(
         default_factory=list, description="Filter by categories (OR logic)"
     ),
-    tags: list[str] = Field(
-        default_factory=list, description="Filter by tags (OR logic)"
-    ),
+    tags: list[str] = Field(default_factory=list, description="Filter by tags (OR logic)"),
     sources: list[str] = Field(
         default_factory=list,
         description="Filter by sources: docker, mcpservers (OR logic)",
@@ -196,9 +207,7 @@ async def registry_find(
 
 @mcp.tool()
 async def registry_list(
-    source: str | None = Field(
-        None, description="Filter by source: docker, mcpservers, or all"
-    ),
+    source: str | None = Field(None, description="Filter by source: docker, mcpservers, or all"),
     limit: int = Field(50, description="Max results to return (1-200)"),
 ) -> str:
     """List all available servers in the registry.
@@ -227,14 +236,210 @@ async def registry_list(
             flags.append("Featured")
         flag_str = f" [{', '.join(flags)}]" if flags else ""
 
-        output.append(
-            f"- **{entry.name}** (`{entry.id}`){flag_str} - {entry.description[:100]}"
-        )
+        output.append(f"- **{entry.name}** (`{entry.id}`){flag_str} - {entry.description[:100]}")
 
     if len(entries) > limit:
         output.append(f"\n*({len(entries) - limit} more servers available)*")
 
     return "\n".join(output)
+
+
+@mcp.tool()
+async def registry_get_docs(
+    entry_id: str = Field(..., description="Registry entry ID to get documentation for"),
+) -> str:
+    """Get documentation and setup instructions for an MCP server.
+
+    Returns:
+        Formatted documentation including setup instructions, usage examples,
+        and configuration requirements
+    """
+    await initialize_registry()
+
+    entry = await registry.get_entry(entry_id)
+    if not entry:
+        return f"Entry not found: {entry_id}"
+
+    return entry.get_documentation()
+
+
+@mcp.tool()
+async def registry_launch_stdio(
+    command: str = Field(..., description="Command to execute (e.g., 'npx', 'python', 'node')"),
+    prefix: str = Field(..., description="Tool prefix for namespacing (e.g., 'filesystem')"),
+    args: list[str] | None = Field(None, description="Command arguments"),
+    env: dict[str, str] | None = Field(
+        None,
+        description="Environment variables (e.g., {'API_KEY': 'your-key'})",
+    ),
+) -> str:
+    """Launch a stdio-based MCP server with custom command, args, and environment.
+
+    This allows you to start any stdio MCP server directly without needing a
+    registry entry. Useful for:
+    - Testing new MCP servers
+    - Running local MCP servers
+    - Using servers with custom configurations
+
+    Examples:
+        command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+        command="python", args=["-m", "my_mcp_server"]
+        command="node", args=["server.js", "--verbose"]
+
+    Args:
+        command: Base command to execute
+        args: List of arguments to pass to the command
+        env: Environment variables to set
+        prefix: Tool prefix for namespacing the discovered tools
+
+    Returns:
+        Confirmation message with activation details
+    """
+    await initialize_registry()
+
+    # Validate command is available
+    is_available, message = await validate_command_available(command)
+    if not is_available:
+        return f"Command validation failed:\n{message}"
+
+    # Generate unique server ID
+    server_id = f"stdio-{prefix}"
+
+    # Check if already active
+    existing = await registry.get_active_mount(server_id)
+    if existing:
+        return f"Server already active with prefix '{prefix}'. Use a different prefix or remove the existing server first."
+
+    try:
+        # Spawn the stdio server
+        args = args or []
+        env = env or {}
+        logger.info(f"Launching stdio server: {command} {' '.join(args)}")
+        server_id, process = await stdio_runner.spawn_server(
+            server_id=server_id,
+            command=command,
+            args=args,
+            env=env,
+        )
+
+        # Create MCP client for this process
+        client = MCPClient(process)
+
+        # Initialize the MCP connection
+        logger.info(f"Initializing MCP client for stdio server...")
+        capabilities = await asyncio.wait_for(client.initialize(), timeout=10.0)
+        logger.info(f"MCP client initialized: {capabilities}")
+
+        # Discover tools
+        logger.info(f"Discovering tools from stdio server...")
+        tools = await asyncio.wait_for(client.list_tools(), timeout=10.0)
+        tool_names = [tool.get("name", "unknown") for tool in tools]
+        logger.info(f"Discovered {len(tool_names)} tools: {tool_names}")
+
+        # Register client with manager
+        mcp_client_manager.register_client(server_id, client, process)
+
+        # Dynamically register discovered tools with FastMCP using schema converter
+        registered_tool_names = []
+
+        # Create executor function that forwards to the MCP client
+        async def tool_executor(tool_name: str, arguments: dict[str, Any]) -> str:
+            """Execute a tool via the MCP client."""
+            client = mcp_client_manager.get_client(server_id)
+            if not client:
+                return f"Error: MCP client not found for server {server_id}"
+
+            try:
+                result = await client.call_tool(tool_name, arguments)
+                return str(result)
+            except Exception as e:
+                logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
+                return f"Error executing {tool_name}: {str(e)}"
+
+        for tool in tools:
+            tool_name = tool.get("name", "")
+
+            # Validate tool schema
+            is_valid, error_msg = validate_tool_schema(tool)
+            if not is_valid:
+                logger.warning(f"Skipping tool {tool_name} due to invalid schema: {error_msg}")
+                continue
+
+            try:
+                # Convert tool definition to Python function with explicit parameters
+                full_tool_name, dynamic_function = convert_tool_to_function(
+                    tool_definition=tool,
+                    prefix=prefix,
+                    executor=tool_executor,
+                )
+
+                # Register with FastMCP
+                mcp.add_tool(dynamic_function)
+                registered_tool_names.append(full_tool_name)
+                logger.info(
+                    f"Registered dynamic tool: {full_tool_name} "
+                    f"(signature: {dynamic_function.__signature__})"
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to register tool {tool_name}: {e}", exc_info=True)
+                # Continue with other tools even if one fails
+
+        # Track registered tools for cleanup
+        _dynamic_tools[server_id] = registered_tool_names
+
+        logger.info(
+            f"Successfully registered {len(registered_tool_names)} dynamic tools from stdio server"
+        )
+
+        # Create active mount record
+        mount = ActiveMount(
+            entry_id=server_id,
+            name=f"Stdio Server ({prefix})",
+            prefix=prefix,
+            container_id=None,
+            pid=process.pid,
+            environment=env,
+            tools=tool_names,
+        )
+
+        await registry.add_active_mount(mount)
+
+        return f"""Successfully launched stdio server!
+
+**Type:** Stdio server (direct process)
+**PID:** {process.pid}
+**Prefix:** {prefix}
+**Command:** {command} {" ".join(args)}
+**Tools discovered:** {len(tool_names)}
+
+Available tools (callable via MCP):
+{chr(10).join(f"  - mcp_{prefix}_{tool}" for tool in tool_names[:10])}
+{f"  ... and {len(tool_names) - 10} more" if len(tool_names) > 10 else ""}
+
+These tools are now directly available through this MCP server!
+You can call them by name (e.g., mcp_{prefix}_{tool_names[0] if tool_names else "toolname"})
+
+Use `registry-config-set` to update environment variables if needed (requires restart).
+Use `registry-remove` with entry_id="{server_id}" to stop this server.
+"""
+
+    except FileNotFoundError as e:
+        return f"Failed to launch stdio server: {e}"
+    except RuntimeError as e:
+        return f"Failed to launch stdio server: {e}"
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout initializing MCP client for stdio server")
+        # Clean up
+        if server_id in stdio_runner._processes:
+            await stdio_runner.stop_server(server_id)
+        return f"Failed to initialize MCP client for stdio server: timeout"
+    except Exception as e:
+        logger.error(f"Error launching stdio server: {e}", exc_info=True)
+        # Clean up
+        if server_id in stdio_runner._processes:
+            await stdio_runner.stop_server(server_id)
+        return f"Failed to launch stdio server: {str(e)}"
 
 
 @mcp.tool()
@@ -324,9 +529,7 @@ async def registry_add(
                     result = await client.call_tool(tool_name, arguments)
                     return str(result)
                 except Exception as e:
-                    logger.error(
-                        f"Error executing tool {tool_name}: {e}", exc_info=True
-                    )
+                    logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
                     return f"Error executing {tool_name}: {str(e)}"
 
             for tool in tools:
@@ -335,9 +538,7 @@ async def registry_add(
                 # Validate tool schema
                 is_valid, error_msg = validate_tool_schema(tool)
                 if not is_valid:
-                    logger.warning(
-                        f"Skipping tool {tool_name} due to invalid schema: {error_msg}"
-                    )
+                    logger.warning(f"Skipping tool {tool_name} due to invalid schema: {error_msg}")
                     continue
 
                 try:
@@ -357,9 +558,7 @@ async def registry_add(
                     )
 
                 except Exception as e:
-                    logger.error(
-                        f"Failed to register tool {tool_name}: {e}", exc_info=True
-                    )
+                    logger.error(f"Failed to register tool {tool_name}: {e}", exc_info=True)
                     # Continue with other tools even if one fails
 
             # Track registered tools for cleanup
@@ -381,9 +580,7 @@ async def registry_add(
                     logger.warning(f"Error killing process: {e}")
             return f"Failed to initialize MCP client for {entry.name}: timeout"
         except Exception as e:
-            logger.error(
-                f"Error initializing MCP client for {entry.name}: {e}", exc_info=True
-            )
+            logger.error(f"Error initializing MCP client for {entry.name}: {e}", exc_info=True)
             # Clean up
             if process:
                 try:
@@ -477,6 +674,12 @@ async def registry_remove(
             # Try force kill
             await podman_runner.kill_container(mount.container_id)
 
+    # Stop stdio server if running
+    if mount.pid and not mount.container_id:
+        # This is a stdio server (has PID but no container_id)
+        logger.info(f"Stopping stdio server {mount.entry_id} (PID: {mount.pid})")
+        await stdio_runner.stop_server(mount.entry_id)
+
     # Remove from active mounts
     await registry.remove_active_mount(entry_id)
 
@@ -514,9 +717,7 @@ async def registry_active() -> str:
         if mount.tools:
             output.append(f"**Tools:** {len(mount.tools)} available")
 
-        output.append(
-            f"**Mounted at:** {mount.mounted_at.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
+        output.append(f"**Mounted at:** {mount.mounted_at.strftime('%Y-%m-%d %H:%M:%S')}")
         output.append("")
 
     return "\n".join(output)
@@ -570,9 +771,7 @@ To apply now, use `registry-remove` followed by `registry-add`.
 
 @mcp.tool()
 async def registry_exec(
-    tool_name: str = Field(
-        ..., description="Fully-qualified tool name (prefix_toolname)"
-    ),
+    tool_name: str = Field(..., description="Fully-qualified tool name (prefix_toolname)"),
     arguments: dict[str, Any] = Field(
         default_factory=dict, description="Tool arguments as key-value pairs"
     ),
@@ -592,15 +791,11 @@ async def registry_exec(
 
     # Parse prefix from tool name (expecting mcp_prefix_toolname format)
     if not tool_name.startswith("mcp_"):
-        return (
-            f"Invalid tool name format. Expected: mcp_prefix_toolname, got: {tool_name}"
-        )
+        return f"Invalid tool name format. Expected: mcp_prefix_toolname, got: {tool_name}"
 
     parts = tool_name.split("_")
     if len(parts) < 3:
-        return (
-            f"Invalid tool name format. Expected: mcp_prefix_toolname, got: {tool_name}"
-        )
+        return f"Invalid tool name format. Expected: mcp_prefix_toolname, got: {tool_name}"
 
     prefix = parts[1]  # Extract prefix after "mcp_"
     actual_tool_name = "_".join(parts[2:])  # Rest after prefix
@@ -649,9 +844,7 @@ Use the server's documentation to verify tool names and arguments.
 
 @mcp.tool()
 async def registry_refresh(
-    source: str = Field(
-        ..., description="Source to refresh: docker, mcpservers, or all"
-    ),
+    source: str = Field(..., description="Source to refresh: docker, mcpservers, or all"),
 ) -> str:
     """Force refresh a registry source.
 

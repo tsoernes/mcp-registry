@@ -81,6 +81,12 @@ class RegistryEntry(BaseModel):
     raw_metadata: dict[str, Any] = Field(
         default_factory=dict, description="Original metadata for debugging"
     )
+    documentation: str | None = Field(
+        None, description="Usage documentation and setup instructions"
+    )
+    usage_example: str | None = Field(
+        None, description="Example command or usage pattern"
+    )
 
     @field_validator("id")
     @classmethod
@@ -111,6 +117,42 @@ class RegistryEntry(BaseModel):
         None,
         description="Command configuration for stdio-based servers (alternative to containers)",
     )
+
+    def get_documentation(self) -> str:
+        """Get formatted documentation for this server.
+
+        Returns:
+            Formatted documentation string with usage instructions
+        """
+        docs = [f"# {self.name}\n"]
+        docs.append(f"{self.description}\n")
+
+        if self.documentation:
+            docs.append(f"\n## Documentation\n{self.documentation}\n")
+
+        if self.server_command:
+            docs.append("\n## Setup (Stdio Server)\n")
+            docs.append(f"**Command:** `{self.server_command.command}`\n")
+            if self.server_command.args:
+                docs.append(f"**Arguments:** `{' '.join(self.server_command.args)}`\n")
+            if self.server_command.env:
+                docs.append("\n**Environment Variables:**\n")
+                for key, val in self.server_command.env.items():
+                    docs.append(f"  - `{key}`: {val}\n")
+        elif self.container_image:
+            docs.append(f"\n## Setup (Container)\n")
+            docs.append(f"**Image:** `{self.container_image}`\n")
+
+        if self.usage_example:
+            docs.append(f"\n## Usage Example\n```\n{self.usage_example}\n```\n")
+
+        if self.requires_api_key:
+            docs.append("\n⚠️ **Note:** This server requires API credentials.\n")
+
+        if self.repo_url:
+            docs.append(f"\n**Source:** {self.repo_url}\n")
+
+        return "".join(docs)
 
     model_config = {"frozen": False, "extra": "ignore"}
 
