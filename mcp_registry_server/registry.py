@@ -94,9 +94,7 @@ class Registry:
         cache_file = self.cache_dir / "registry_entries.json"
         try:
             data = {
-                "entries": [
-                    entry.model_dump(mode="json") for entry in self._entries.values()
-                ],
+                "entries": [entry.model_dump(mode="json") for entry in self._entries.values()],
                 "updated_at": datetime.utcnow().isoformat(),
             }
             with open(cache_file, "w", encoding="utf-8") as f:
@@ -121,9 +119,7 @@ class Registry:
                     mount = ActiveMount(**mount_data)
                     self._active_mounts[mount.entry_id] = mount
                 except ValidationError as e:
-                    logger.warning(
-                        f"Failed to load active mount {mount_data.get('entry_id')}: {e}"
-                    )
+                    logger.warning(f"Failed to load active mount {mount_data.get('entry_id')}: {e}")
 
             logger.info(f"Loaded {len(self._active_mounts)} active mounts from cache")
         except Exception as e:
@@ -134,10 +130,7 @@ class Registry:
         mounts_file = self.cache_dir / "active_mounts.json"
         try:
             data = {
-                "mounts": [
-                    mount.model_dump(mode="json")
-                    for mount in self._active_mounts.values()
-                ],
+                "mounts": [mount.model_dump(mode="json") for mount in self._active_mounts.values()],
                 "updated_at": datetime.utcnow().isoformat(),
             }
             with open(mounts_file, "w", encoding="utf-8") as f:
@@ -222,7 +215,9 @@ class Registry:
         score += min(len(entry.categories), 3) * 2.0
 
         # Source-based scoring (official sources rank higher)
-        if entry.source == SourceType.DOCKER:
+        if entry.source == SourceType.MCP_OFFICIAL:
+            score += 15.0  # Highest priority - official MCP registry
+        elif entry.source == SourceType.DOCKER:
             score += 5.0
 
         # Servers with container images are typically more production-ready
@@ -252,15 +247,11 @@ class Registry:
 
         if query.categories:
             candidates = [
-                e
-                for e in candidates
-                if any(cat in e.categories for cat in query.categories)
+                e for e in candidates if any(cat in e.categories for cat in query.categories)
             ]
 
         if query.tags:
-            candidates = [
-                e for e in candidates if any(tag in e.tags for tag in query.tags)
-            ]
+            candidates = [e for e in candidates if any(tag in e.tags for tag in query.tags)]
 
         if query.official_only:
             candidates = [e for e in candidates if e.official]
@@ -269,9 +260,7 @@ class Registry:
             candidates = [e for e in candidates if e.featured]
 
         if query.requires_api_key is not None:
-            candidates = [
-                e for e in candidates if e.requires_api_key == query.requires_api_key
-            ]
+            candidates = [e for e in candidates if e.requires_api_key == query.requires_api_key]
 
         # Fuzzy text search with popularity ranking
         if query.query.strip():
@@ -311,9 +300,7 @@ class Registry:
             results = [entry for entry, _ in scored_results[: query.limit]]
         else:
             # No text query, sort by popularity only
-            candidates.sort(
-                key=lambda e: self._calculate_popularity_score(e), reverse=True
-            )
+            candidates.sort(key=lambda e: self._calculate_popularity_score(e), reverse=True)
             results = candidates[: query.limit]
 
         return results
@@ -392,9 +379,7 @@ class Registry:
             if mount:
                 mount.environment.update(environment)
                 self._save_active_mounts()
-                logger.info(
-                    f"Updated environment for {mount.name}: {list(environment.keys())}"
-                )
+                logger.info(f"Updated environment for {mount.name}: {list(environment.keys())}")
             return mount
 
     async def get_status(self) -> RegistryStatus:
@@ -407,12 +392,8 @@ class Registry:
         for source_type, status in self._source_status.items():
             sources_info[source_type.value] = {
                 "entry_count": status.entry_count,
-                "last_refresh": (
-                    status.last_refresh.isoformat() if status.last_refresh else None
-                ),
-                "last_attempt": (
-                    status.last_attempt.isoformat() if status.last_attempt else None
-                ),
+                "last_refresh": (status.last_refresh.isoformat() if status.last_refresh else None),
+                "last_attempt": (status.last_attempt.isoformat() if status.last_attempt else None),
                 "status": status.status,
                 "error_message": status.error_message,
             }

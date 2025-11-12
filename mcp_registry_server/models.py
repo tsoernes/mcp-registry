@@ -10,9 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 class ServerCommand(BaseModel):
     """Command configuration for running an MCP server via stdio."""
 
-    command: str = Field(
-        ..., description="Command to execute (e.g., 'npx', 'python', 'node')"
-    )
+    command: str = Field(..., description="Command to execute (e.g., 'npx', 'python', 'node')")
     args: list[str] = Field(
         default_factory=list,
         description="Command arguments (e.g., ['-y', '@modelcontextprotocol/server-filesystem'])",
@@ -30,6 +28,7 @@ class SourceType(str, Enum):
 
     DOCKER = "docker"
     MCPSERVERS = "mcpservers"
+    MCP_OFFICIAL = "mcp-official"
     AWESOME = "awesome"
     CUSTOM = "custom"
 
@@ -61,16 +60,12 @@ class RegistryEntry(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Searchable tags")
     official: bool = Field(False, description="Official status (from mcpservers.org)")
     featured: bool = Field(False, description="Featured status (from mcpservers.org)")
-    requires_api_key: bool = Field(
-        False, description="Whether API credentials are needed"
-    )
+    requires_api_key: bool = Field(False, description="Whether API credentials are needed")
     tools: list[str] = Field(
         default_factory=list,
         description="Available tool names (discovered on activation)",
     )
-    launch_method: LaunchMethod = Field(
-        LaunchMethod.UNKNOWN, description="Preferred launch method"
-    )
+    launch_method: LaunchMethod = Field(LaunchMethod.UNKNOWN, description="Preferred launch method")
     last_refreshed: datetime = Field(
         default_factory=datetime.utcnow, description="Last metadata update timestamp"
     )
@@ -84,9 +79,7 @@ class RegistryEntry(BaseModel):
     documentation: str | None = Field(
         None, description="Usage documentation and setup instructions"
     )
-    usage_example: str | None = Field(
-        None, description="Example command or usage pattern"
-    )
+    usage_example: str | None = Field(None, description="Example command or usage pattern")
 
     @field_validator("id")
     @classmethod
@@ -163,9 +156,7 @@ class ActiveMount(BaseModel):
     entry_id: str = Field(..., description="Registry entry ID")
     name: str = Field(..., description="Display name")
     prefix: str = Field(..., description="Tool prefix for namespacing")
-    container_id: str | None = Field(
-        None, description="Podman container ID if applicable"
-    )
+    container_id: str | None = Field(None, description="Podman container ID if applicable")
     pid: int | None = Field(None, description="Process ID if applicable")
     environment: dict[str, str] = Field(
         default_factory=dict, description="Environment variables set for this mount"
@@ -173,9 +164,7 @@ class ActiveMount(BaseModel):
     mounted_at: datetime = Field(
         default_factory=datetime.utcnow, description="When server was activated"
     )
-    tools: list[str] = Field(
-        default_factory=list, description="Discovered tools from this server"
-    )
+    tools: list[str] = Field(default_factory=list, description="Discovered tools from this server")
     resources: list[str] = Field(
         default_factory=list, description="Discovered resources from this server"
     )
@@ -208,12 +197,8 @@ class SourceRefreshStatus(BaseModel):
     """Status of a specific registry source."""
 
     source_type: SourceType = Field(..., description="Source identifier")
-    last_refresh: datetime | None = Field(
-        None, description="Last successful refresh timestamp"
-    )
-    last_attempt: datetime | None = Field(
-        None, description="Last refresh attempt timestamp"
-    )
+    last_refresh: datetime | None = Field(None, description="Last successful refresh timestamp")
+    last_attempt: datetime | None = Field(None, description="Last refresh attempt timestamp")
     entry_count: int = Field(0, description="Number of entries from this source")
     status: str = Field("unknown", description="Current status (ok, error, pending)")
     error_message: str | None = Field(None, description="Last error if any")
@@ -224,15 +209,11 @@ class SourceRefreshStatus(BaseModel):
 class SearchQuery(BaseModel):
     """Search query parameters."""
 
-    query: str = Field(
-        ..., description="Search text (fuzzy matched against name/description)"
-    )
+    query: str = Field(..., description="Search text (fuzzy matched against name/description)")
     categories: list[str] = Field(
         default_factory=list, description="Filter by categories (OR logic)"
     )
-    tags: list[str] = Field(
-        default_factory=list, description="Filter by tags (OR logic)"
-    )
+    tags: list[str] = Field(default_factory=list, description="Filter by tags (OR logic)")
     sources: list[SourceType] = Field(
         default_factory=list, description="Filter by sources (OR logic)"
     )

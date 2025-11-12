@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .models import SourceRefreshStatus, SourceType
 from .registry import Registry
-from .scrapers import scrape_docker_registry, scrape_mcpservers_org
+from .scrapers import scrape_docker_registry, scrape_mcp_official_registry, scrape_mcpservers_org
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,40 @@ class RefreshScheduler:
                 status.error_message = str(e)
                 await self.registry.update_source_status(status)
 
+    async def _refresh_mcp_official(self) -> None:
+        """Refresh MCP Official Registry source."""
+        source_type = SourceType.MCP_OFFICIAL
+
+        async with self.registry._refresh_locks[source_type]:
+            logger.info("Starting MCP Official Registry refresh")
+            status = SourceRefreshStatus(
+                source_type=source_type,
+                last_attempt=datetime.utcnow(),
+                status="refreshing",
+            )
+            await self.registry.update_source_status(status)
+
+            try:
+                # Scrape MCP Official Registry API
+                entries = await scrape_mcp_official_registry(limit=None, timeout=30.0)
+
+                # Bulk add to registry
+                count = await self.registry.bulk_add_entries(entries)
+
+                # Update status
+                status.last_refresh = datetime.utcnow()
+                status.entry_count = count
+                status.status = "ok"
+                status.error_message = None
+                await self.registry.update_source_status(status)
+
+                logger.info(f"Successfully refreshed MCP Official Registry: {count} entries")
+            except Exception as e:
+                logger.error(f"Failed to refresh MCP Official Registry: {e}", exc_info=True)
+                status.status = "error"
+                status.error_message = str(e)
+                await self.registry.update_source_status(status)
+
     async def _refresh_source(self, source_type: SourceType) -> None:
         """Refresh a specific source.
 
@@ -109,6 +143,8 @@ class RefreshScheduler:
             await self._refresh_mcpservers()
         elif source_type == SourceType.DOCKER:
             await self._refresh_docker_registry()
+        elif source_type == SourceType.MCP_OFFICIAL:
+            await self._refresh_mcp_official()
         else:
             logger.warning(f"No refresh handler for source: {source_type}")
 
@@ -130,9 +166,7 @@ class RefreshScheduler:
                     logger.info(f"Triggering refresh for {source_type.value}")
                     await self._refresh_source(source_type)
                 else:
-                    logger.debug(
-                        f"Skipping refresh for {source_type.value} (too recent)"
-                    )
+                    logger.debug(f"Skipping refresh for {source_type.value} (too recent)")
 
                 # Wait for next check (check more frequently than interval)
                 check_interval = min(self._refresh_interval_seconds / 4, 3600)
@@ -158,7 +192,11 @@ class RefreshScheduler:
         logger.info("Starting refresh scheduler")
 
         # Start periodic refresh tasks for each source
-        sources_to_refresh = [SourceType.MCPSERVERS, SourceType.DOCKER]
+        sources_to_refresh = [
+            SourceType.MCPSERVERS,
+            SourceType.DOCKER,
+            SourceType.MCP_OFFICIAL,
+        ]
 
         for source_type in sources_to_refresh:
             task = asyncio.create_task(self._periodic_refresh_loop(source_type))
