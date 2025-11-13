@@ -41,11 +41,14 @@ class RefreshScheduler:
 
             try:
                 # Scrape mcpservers.org
+                # Use limit to prevent CPU exhaustion from parsing thousands of HTML files
+                # Disable GitHub stars fetching to reduce HTTP requests and improve performance
                 entries = await scrape_mcpservers_org(
                     concurrency=20,
-                    limit=None,
+                    limit=500,  # Reasonable limit to avoid processing 5000+ servers
                     use_cache=True,
                     cache_dir=str(self.registry.cache_dir / "mcpservers_html"),
+                    fetch_github_stars_flag=False,  # Skip GitHub API calls during background refresh
                 )
 
                 # Bulk add to registry

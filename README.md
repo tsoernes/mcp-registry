@@ -198,6 +198,21 @@ Search results are sorted by a combination of:
 
 Active servers are persisted to `cache/active_mounts.json` and automatically restored on server startup.
 
+### Performance Considerations
+
+The server includes background tasks that periodically refresh registry data. To prevent excessive CPU usage:
+
+- **mcpservers.org scraping is limited to 500 servers by default** - The full site contains 5000+ servers, and parsing all HTML files is extremely CPU-intensive
+- **GitHub stars fetching is disabled during background refreshes** - This reduces HTTP requests and improves performance
+- **Refresh checks occur every 6 hours** - But actual refreshes only happen if data is older than 24 hours
+
+If you experience high CPU usage:
+1. Check if a background refresh is running (logs will show "Starting X refresh")
+2. The initial refresh after installation processes more data than subsequent refreshes
+3. The scraper uses cached HTML when available to reduce network and parsing overhead
+
+You can adjust these settings in `mcp_registry_server/tasks.py` if needed.
+
 ## MCP Protocol Support
 
 ### Tools List Changed Notifications
